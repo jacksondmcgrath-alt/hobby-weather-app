@@ -2713,584 +2713,614 @@ except Exception as e:
     st.write(e)
     st.stop()
 
+forecast_tab, times_tab, log_tab, history_tab, manage_tab = st.tabs(
+    [
+        "Forecast",
+        "Best Times",
+        "Log Activity",
+        "History & Charts",
+        "Manage Logs",
+    ]
+)
 
 # -------------------------
 # Display predictions
 # -------------------------
 
-st.header("Predicted Scores")
+with forecast_tab:
+    st.header("Predicted Scores")
 
-activities = sorted(predictions["activity"].unique())
+    activities = sorted(predictions["activity"].unique())
 
-selected_activities = st.multiselect(
-    "Choose activities to show",
-    options=activities,
-    default=activities,
-)
+    selected_activities = st.multiselect(
+        "Choose activities to show",
+        options=activities,
+        default=activities,
+    )
 
-filtered_predictions = predictions[
-    predictions["activity"].isin(selected_activities)
-].copy()
+    filtered_predictions = predictions[
+        predictions["activity"].isin(selected_activities)
+    ].copy()
 
-if phone_friendly_view:
-    for forecast_date in sorted(filtered_predictions["date"].unique()):
-        st.subheader(forecast_date)
+    if phone_friendly_view:
+        for forecast_date in sorted(filtered_predictions["date"].unique()):
+            st.subheader(forecast_date)
 
-        day_predictions = filtered_predictions[
-            filtered_predictions["date"] == forecast_date
-        ].sort_values("predicted_score", ascending=False)
+            day_predictions = filtered_predictions[
+                filtered_predictions["date"] == forecast_date
+            ].sort_values("predicted_score", ascending=False)
 
-        for _, row in day_predictions.iterrows():
-            recommended_window, window_score = get_recommended_window_for_activity(
-                time_recommendations=time_recommendations,
-                selected_date=row["date"],
-                selected_activity=row["activity"],
-            )
-
-            title = (
-                f"{row['activity']}: {row['predicted_score']} "
-                f"({row['label']})"
-            )
-
-            with st.expander(title):
-                st.write(f"**Base score:** {row.get('base_predicted_score', row['predicted_score'])}")
-                st.write(f"**Preference adjustment:** {row.get('preference_adjustment', 0)}")
-                st.write(f"**Recommended window:** {recommended_window}")
-
-                if window_score is not None:
-                    st.write(f"**Window score:** {window_score}")
-
-                st.write("**Why this score:**")
-                st.write(row["explanation"])
-
-                st.write("**Gear / Safety Notes:**")
-                st.write(row["gear_notes"])
-
-                st.write(
-                    f"Temp: {row.get('avg_temp', 'N/A')}°F | "
-                    f"Wind: {row.get('wind_max', 'N/A')} mph | "
-                    f"Rain: {row.get('rain_chance', 'N/A')}% | "
-                    f"Bugs: {row.get('bug_index', 'N/A')}"
+            for _, row in day_predictions.iterrows():
+                recommended_window, window_score = get_recommended_window_for_activity(
+                    time_recommendations=time_recommendations,
+                    selected_date=row["date"],
+                    selected_activity=row["activity"],
                 )
-else:
+
+                title = (
+                    f"{row['activity']}: {row['predicted_score']} "
+                    f"({row['label']})"
+                )
+
+                with st.expander(title):
+                    st.write(f"**Base score:** {row.get('base_predicted_score', row['predicted_score'])}")
+                    st.write(f"**Preference adjustment:** {row.get('preference_adjustment', 0)}")
+                    st.write(f"**Recommended window:** {recommended_window}")
+
+                    if window_score is not None:
+                        st.write(f"**Window score:** {window_score}")
+
+                    st.write("**Why this score:**")
+                    st.write(row["explanation"])
+
+                    st.write("**Gear / Safety Notes:**")
+                    st.write(row["gear_notes"])
+
+                    st.write(
+                        f"Temp: {row.get('avg_temp', 'N/A')}°F | "
+                        f"Wind: {row.get('wind_max', 'N/A')} mph | "
+                        f"Rain: {row.get('rain_chance', 'N/A')}% | "
+                        f"Bugs: {row.get('bug_index', 'N/A')}"
+                    )
+    else:
+        st.dataframe(
+            filtered_predictions.sort_values(["date", "activity"]),
+            width="stretch",
+        )
+
+    st.header("Best Days This Forecast")
+
+    summary_rows = []
+
+    for activity in sorted(filtered_predictions["activity"].unique()):
+        activity_predictions = filtered_predictions[
+            filtered_predictions["activity"] == activity
+        ]
+
+        if len(activity_predictions) == 0:
+            continue
+
+        best_index = activity_predictions["predicted_score"].idxmax()
+        best_row = activity_predictions.loc[best_index]
+
+        recommended_window, window_score = get_recommended_window_for_activity(
+            time_recommendations=time_recommendations,
+            selected_date=best_row["date"],
+            selected_activity=activity,
+        )
+
+        summary_rows.append({
+            "Activity": activity,
+            "Best Date": best_row["date"],
+            "Best Score": best_row["predicted_score"],
+            "Label": best_row["label"],
+            "Recommended Window": recommended_window,
+            "Window Score": window_score,
+            "Main Reason": best_row["explanation"],
+        })
+
+    best_days_summary = pd.DataFrame(summary_rows)
+
     st.dataframe(
-        filtered_predictions.sort_values(["date", "activity"]),
+        best_days_summary,
         width="stretch",
     )
 
-st.header("Best Days This Forecast")
+    st.subheader("Score Chart")
 
-summary_rows = []
-
-for activity in sorted(filtered_predictions["activity"].unique()):
-    activity_predictions = filtered_predictions[
-        filtered_predictions["activity"] == activity
-    ]
-
-    if len(activity_predictions) == 0:
-        continue
-
-    best_index = activity_predictions["predicted_score"].idxmax()
-    best_row = activity_predictions.loc[best_index]
-
-    recommended_window, window_score = get_recommended_window_for_activity(
-        time_recommendations=time_recommendations,
-        selected_date=best_row["date"],
-        selected_activity=activity,
+    chart_data = filtered_predictions.pivot(
+        index="date",
+        columns="activity",
+        values="predicted_score",
     )
 
-    summary_rows.append({
-        "Activity": activity,
-        "Best Date": best_row["date"],
-        "Best Score": best_row["predicted_score"],
-        "Label": best_row["label"],
-        "Recommended Window": recommended_window,
-        "Window Score": window_score,
-        "Main Reason": best_row["explanation"],
-    })
+    st.line_chart(chart_data)
 
-best_days_summary = pd.DataFrame(summary_rows)
 
-st.dataframe(
-    best_days_summary,
-    width="stretch",
-)
+    st.download_button(
+        label="Download latest predictions as CSV",
+        data=predictions.to_csv(index=False),
+        file_name="latest_predictions.csv",
+        mime="text/csv",
+    )
 
-st.subheader("Score Chart")
+with times_tab:
+    st.header("Best Time Windows")
 
-chart_data = filtered_predictions.pivot(
-    index="date",
-    columns="activity",
-    values="predicted_score",
-)
+    st.write(
+        "Running is allowed from 1 hour before sunrise through 1 hour after sunset. "
+        "Kayaking and disc golf are restricted to daylight."
+    )
 
-st.line_chart(chart_data)
-
-st.header("Best Times")
-
-st.write(
-    "Running times are allowed from 1 hour before sunrise through 1 hour after sunset."
-)
-
-st.dataframe(
-    time_recommendations,
-    width="stretch",
-)
-
-st.download_button(
-    label="Download latest predictions as CSV",
-    data=predictions.to_csv(index=False),
-    file_name="latest_predictions.csv",
-    mime="text/csv",
-)
-
-st.header("Best Time Windows")
-
-st.write(
-    "Running is allowed from 1 hour before sunrise through 1 hour after sunset. "
-    "Kayaking and disc golf are restricted to daylight."
-)
-
-st.dataframe(
-    time_recommendations,
-    width="stretch",
-)
+    st.dataframe(
+        time_recommendations,
+        width="stretch",
+    )
 
 # -------------------------
 # Log actual result
 # -------------------------
+with log_tab:
+    st.header("Log an Actual Result")
 
-st.header("Log an Actual Result")
-
-log_mode = st.radio(
-    "What type of entry are you logging?",
-    options=["Current forecast date", "Past/custom date"],
-    horizontal=True,
-)
-
-activity_options = sorted(predictions["activity"].unique())
-
-if log_mode == "Current forecast date":
-    col1, col2 = st.columns(2)
-
-    with col1:
-        selected_date = st.selectbox(
-            "Choose the date",
-            options=sorted(predictions["date"].unique()),
-            key="current_log_date",
-        )
-
-    with col2:
-        activities_for_date = sorted(
-            predictions[predictions["date"] == selected_date]["activity"].unique()
-        )
-
-        selected_activity = st.selectbox(
-            "Choose the activity",
-            options=activities_for_date,
-            key="current_log_activity",
-        )
-
-else:
-    col1, col2 = st.columns(2)
-
-    with col1:
-        default_past_date = (pd.Timestamp.today() - pd.Timedelta(days=1)).date()
-
-        selected_date_obj = st.date_input(
-            "Date of activity",
-            value=default_past_date,
-            key="past_log_date",
-        )
-
-        selected_date = pd.to_datetime(selected_date_obj).strftime("%Y-%m-%d")
-
-    with col2:
-        selected_activity = st.selectbox(
-            "Choose the activity",
-            options=activity_options,
-            key="past_log_activity",
-        )
-
-
-selected_prediction = find_saved_prediction(
-    predictions=predictions,
-    selected_date=selected_date,
-    selected_activity=selected_activity,
-)
-
-
-if selected_prediction is not None:
-    predicted_score = int(selected_prediction["predicted_score"])
-    predicted_label = selected_prediction.get("label", score_label(predicted_score))
-    prediction_explanation = selected_prediction.get("explanation", "")
-    prediction_gear_notes = selected_prediction.get("gear_notes", "")
-
-else:
-    st.warning(
-        "No saved prediction was found for this date/activity. "
-        "You can manually enter the predicted score if you remember it."
+    log_mode = st.radio(
+        "What type of entry are you logging?",
+        options=["Current forecast date", "Past/custom date"],
+        horizontal=True,
     )
 
-    know_predicted_score = st.checkbox(
-        "I know or remember the predicted score",
-        value=False,
-    )
+    activity_options = sorted(predictions["activity"].unique())
 
-    if know_predicted_score:
-        predicted_score = st.number_input(
-            "Manually enter predicted score",
-            min_value=0,
-            max_value=100,
-            value=50,
-        )
+    if log_mode == "Current forecast date":
+        col1, col2 = st.columns(2)
 
-        predicted_score = int(predicted_score)
-        predicted_label = score_label(predicted_score)
+        with col1:
+            selected_date = st.selectbox(
+                "Choose the date",
+                options=sorted(predictions["date"].unique()),
+                key="current_log_date",
+            )
+
+        with col2:
+            activities_for_date = sorted(
+                predictions[predictions["date"] == selected_date]["activity"].unique()
+            )
+
+            selected_activity = st.selectbox(
+                "Choose the activity",
+                options=activities_for_date,
+                key="current_log_activity",
+            )
+
     else:
-        predicted_score = None
-        predicted_label = "No prediction"
+        col1, col2 = st.columns(2)
 
-    prediction_explanation = "No saved prediction explanation available."
-    prediction_gear_notes = "No saved gear notes available."
+        with col1:
+            default_past_date = (pd.Timestamp.today() - pd.Timedelta(days=1)).date()
+
+            selected_date_obj = st.date_input(
+                "Date of activity",
+                value=default_past_date,
+                key="past_log_date",
+            )
+
+            selected_date = pd.to_datetime(selected_date_obj).strftime("%Y-%m-%d")
+
+        with col2:
+            selected_activity = st.selectbox(
+                "Choose the activity",
+                options=activity_options,
+                key="past_log_activity",
+            )
 
 
-st.subheader("Prediction Details")
+    selected_prediction = find_saved_prediction(
+        predictions=predictions,
+        selected_date=selected_date,
+        selected_activity=selected_activity,
+    )
 
-metric1, metric2, metric3 = st.columns(3)
 
-with metric1:
-    if predicted_score is None:
-        st.metric("Predicted Score", "N/A")
+    if selected_prediction is not None:
+        predicted_score = int(selected_prediction["predicted_score"])
+        predicted_label = selected_prediction.get("label", score_label(predicted_score))
+        prediction_explanation = selected_prediction.get("explanation", "")
+        prediction_gear_notes = selected_prediction.get("gear_notes", "")
+
     else:
-        st.metric("Predicted Score", predicted_score)
-
-with metric2:
-    st.metric("Predicted Label", predicted_label)
-
-with metric3:
-    st.metric("Activity", selected_activity)
-
-st.write("**Why this score:**")
-st.write(prediction_explanation)
-
-st.write("**Gear / Safety Notes:**")
-st.write(prediction_gear_notes)
-
-
-recommended_time_window, time_window_score = get_recommended_window_for_activity(
-    time_recommendations=time_recommendations,
-    selected_date=selected_date,
-    selected_activity=selected_activity,
-)
-
-if log_mode == "Past/custom date" and recommended_time_window == "Not available":
-    recommended_time_window = "Not available for this past/custom date"
-
-st.write("**Recommended Time Window:**")
-st.write(recommended_time_window)
-
-if time_window_score is not None:
-    st.write(f"Window score: {time_window_score}")
-
-if selected_activity == "Running":
-    matching_time = time_recommendations[
-        time_recommendations["date"] == selected_date
-    ]
-
-    if len(matching_time) > 0:
-        st.write(matching_time.iloc[0].get("Running Light Note", ""))
-
-st.subheader("Your Actual Experience")
-
-actual_enjoyment = st.slider(
-    "How good was it actually?",
-    min_value=1,
-    max_value=10,
-    value=7,
-    help="1 = terrible, 10 = excellent",
-)
-
-actual_score = actual_enjoyment * 10
-
-did_i_go = st.selectbox(
-    "Did you actually do this activity?",
-    options=["Yes", "No", "Partially"],
-)
-
-st.subheader("Actual Conditions")
-
-actual_time = st.text_input(
-    "What time did you actually go?",
-    placeholder="Example: 7:30 AM or 6:00 PM",
-)
-
-followed_recommended_window = st.selectbox(
-    "Did you go during the recommended time window?",
-    options=["Not sure", "Yes", "No", "Partially"],
-)
-
-actual_bugs = st.slider(
-    "Actual bugs",
-    min_value=0,
-    max_value=10,
-    value=5,
-    help="0 = no bugs, 10 = terrible bugs",
-)
-
-actual_wind_annoyance = st.slider(
-    "Actual wind annoyance",
-    min_value=0,
-    max_value=10,
-    value=5,
-    help="0 = no wind problem, 10 = wind ruined it",
-)
-
-actual_humidity_comfort = st.slider(
-    "Actual humidity comfort",
-    min_value=0,
-    max_value=10,
-    value=7,
-    help="0 = miserable humidity, 10 = very comfortable",
-)
-
-actual_ground_wetness = "Not applicable"
-actual_water_conditions = "Not applicable"
-fish_activity = "Not applicable"
-visibility_light = "Not applicable"
-
-if selected_activity in ["Camping", "Running", "Disc Golf"]:
-    actual_ground_wetness = st.selectbox(
-        "Actual ground/course/trail condition",
-        options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
-    )
-
-if selected_activity in ["Fishing", "Kayaking"]:
-    actual_water_conditions = st.selectbox(
-        "Actual water conditions",
-        options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
-    )
-
-if selected_activity == "Fishing":
-    fish_activity = st.selectbox(
-        "Fish activity",
-        options=["None", "Low", "Medium", "High", "Not sure"],
-    )
-
-if selected_activity == "Running":
-    visibility_light = st.selectbox(
-        "Visibility/light conditions",
-        options=["Bright daylight", "Low light but okay", "Too dark", "Not sure"],
-    )
-
-notes = st.text_area(
-    "Notes",
-    placeholder="Example: Bugs were worse than expected. Wind felt stronger. Fish were active near sunset.",
-)
-
-if st.button("Save Log Entry"):
-    if predicted_score is None:
-        prediction_error = None
-        absolute_error = None
-    else:
-        prediction_error = actual_score - predicted_score
-        absolute_error = abs(prediction_error)
-
-    new_entry = {
-        "logged_at": datetime.now().isoformat(timespec="seconds"),
-        "date": selected_date,
-        "activity": selected_activity,
-        "predicted_score": predicted_score if predicted_score is not None else "",
-        "recommended_time_window": recommended_time_window,
-        "time_window_score": time_window_score,
-        "actual_time": actual_time,
-        "followed_recommended_window": followed_recommended_window,
-        "actual_enjoyment_1_to_10": actual_enjoyment,
-        "actual_score_0_to_100": actual_score,
-        "prediction_error": prediction_error,
-        "absolute_error": absolute_error,
-        "did_i_go": did_i_go,
-        "actual_bugs_1_to_10": actual_bugs,
-        "actual_wind_annoyance_1_to_10": actual_wind_annoyance,
-        "actual_humidity_comfort_1_to_10": actual_humidity_comfort,
-        "actual_ground_wetness": actual_ground_wetness,
-        "actual_water_conditions": actual_water_conditions,
-        "fish_activity": fish_activity,
-        "visibility_light": visibility_light,
-        "notes": notes,
-    }
-
-    try:
-        response = save_log_entry(new_entry)
-
-        st.success("Log entry saved to Supabase!")
-        st.rerun()
-
-    except Exception as e:
-        st.error("Could not save log entry to Supabase.")
-        st.write(type(e).__name__)
-        st.write(e)
-
-def show_accuracy_charts(activity_log):
-    """
-    Shows accuracy summaries and charts from the activity log.
-    """
-
-    chart_log = activity_log.copy()
-
-    numeric_columns = [
-        "predicted_score",
-        "actual_score_0_to_100",
-        "prediction_error",
-        "absolute_error",
-    ]
-
-    for column in numeric_columns:
-        chart_log[column] = pd.to_numeric(
-            chart_log[column],
-            errors="coerce",
+        st.warning(
+            "No saved prediction was found for this date/activity. "
+            "You can manually enter the predicted score if you remember it."
         )
 
-    chart_log["logged_at"] = pd.to_datetime(
-        chart_log["logged_at"],
-        errors="coerce",
+        know_predicted_score = st.checkbox(
+            "I know or remember the predicted score",
+            value=False,
+        )
+
+        if know_predicted_score:
+            predicted_score = st.number_input(
+                "Manually enter predicted score",
+                min_value=0,
+                max_value=100,
+                value=50,
+            )
+
+            predicted_score = int(predicted_score)
+            predicted_label = score_label(predicted_score)
+        else:
+            predicted_score = None
+            predicted_label = "No prediction"
+
+        prediction_explanation = "No saved prediction explanation available."
+        prediction_gear_notes = "No saved gear notes available."
+
+
+    st.subheader("Prediction Details")
+
+    metric1, metric2, metric3 = st.columns(3)
+
+    with metric1:
+        if predicted_score is None:
+            st.metric("Predicted Score", "N/A")
+        else:
+            st.metric("Predicted Score", predicted_score)
+
+    with metric2:
+        st.metric("Predicted Label", predicted_label)
+
+    with metric3:
+        st.metric("Activity", selected_activity)
+
+    st.write("**Why this score:**")
+    st.write(prediction_explanation)
+
+    st.write("**Gear / Safety Notes:**")
+    st.write(prediction_gear_notes)
+
+
+    recommended_time_window, time_window_score = get_recommended_window_for_activity(
+        time_recommendations=time_recommendations,
+        selected_date=selected_date,
+        selected_activity=selected_activity,
     )
 
-    chart_log = chart_log.dropna(
-        subset=[
-            "logged_at",
+    if log_mode == "Past/custom date" and recommended_time_window == "Not available":
+        recommended_time_window = "Not available for this past/custom date"
+
+    st.write("**Recommended Time Window:**")
+    st.write(recommended_time_window)
+
+    if time_window_score is not None:
+        st.write(f"Window score: {time_window_score}")
+
+    if selected_activity == "Running":
+        matching_time = time_recommendations[
+            time_recommendations["date"] == selected_date
+        ]
+
+        if len(matching_time) > 0:
+            st.write(matching_time.iloc[0].get("Running Light Note", ""))
+
+    st.subheader("Your Actual Experience")
+
+    actual_enjoyment = st.slider(
+        "How good was it actually?",
+        min_value=1,
+        max_value=10,
+        value=7,
+        help="1 = terrible, 10 = excellent",
+    )
+
+    actual_score = actual_enjoyment * 10
+
+    did_i_go = st.selectbox(
+        "Did you actually do this activity?",
+        options=["Yes", "No", "Partially"],
+    )
+
+    st.subheader("Actual Conditions")
+
+    actual_time = st.text_input(
+        "What time did you actually go?",
+        placeholder="Example: 7:30 AM or 6:00 PM",
+    )
+
+    followed_recommended_window = st.selectbox(
+        "Did you go during the recommended time window?",
+        options=["Not sure", "Yes", "No", "Partially"],
+    )
+
+    actual_bugs = st.slider(
+        "Actual bugs",
+        min_value=0,
+        max_value=10,
+        value=5,
+        help="0 = no bugs, 10 = terrible bugs",
+    )
+
+    actual_wind_annoyance = st.slider(
+        "Actual wind annoyance",
+        min_value=0,
+        max_value=10,
+        value=5,
+        help="0 = no wind problem, 10 = wind ruined it",
+    )
+
+    actual_humidity_comfort = st.slider(
+        "Actual humidity comfort",
+        min_value=0,
+        max_value=10,
+        value=7,
+        help="0 = miserable humidity, 10 = very comfortable",
+    )
+
+    actual_ground_wetness = "Not applicable"
+    actual_water_conditions = "Not applicable"
+    fish_activity = "Not applicable"
+    visibility_light = "Not applicable"
+
+    if selected_activity in ["Camping", "Running", "Disc Golf"]:
+        actual_ground_wetness = st.selectbox(
+            "Actual ground/course/trail condition",
+            options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
+        )
+
+    if selected_activity in ["Fishing", "Kayaking"]:
+        actual_water_conditions = st.selectbox(
+            "Actual water conditions",
+            options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
+        )
+
+    if selected_activity == "Fishing":
+        fish_activity = st.selectbox(
+            "Fish activity",
+            options=["None", "Low", "Medium", "High", "Not sure"],
+        )
+
+    if selected_activity == "Running":
+        visibility_light = st.selectbox(
+            "Visibility/light conditions",
+            options=["Bright daylight", "Low light but okay", "Too dark", "Not sure"],
+        )
+
+    notes = st.text_area(
+        "Notes",
+        placeholder="Example: Bugs were worse than expected. Wind felt stronger. Fish were active near sunset.",
+    )
+
+    if st.button("Save Log Entry"):
+        if predicted_score is None:
+            prediction_error = None
+            absolute_error = None
+        else:
+            prediction_error = actual_score - predicted_score
+            absolute_error = abs(prediction_error)
+
+        new_entry = {
+            "logged_at": datetime.now().isoformat(timespec="seconds"),
+            "date": selected_date,
+            "activity": selected_activity,
+            "predicted_score": predicted_score if predicted_score is not None else "",
+            "recommended_time_window": recommended_time_window,
+            "time_window_score": time_window_score,
+            "actual_time": actual_time,
+            "followed_recommended_window": followed_recommended_window,
+            "actual_enjoyment_1_to_10": actual_enjoyment,
+            "actual_score_0_to_100": actual_score,
+            "prediction_error": prediction_error,
+            "absolute_error": absolute_error,
+            "did_i_go": did_i_go,
+            "actual_bugs_1_to_10": actual_bugs,
+            "actual_wind_annoyance_1_to_10": actual_wind_annoyance,
+            "actual_humidity_comfort_1_to_10": actual_humidity_comfort,
+            "actual_ground_wetness": actual_ground_wetness,
+            "actual_water_conditions": actual_water_conditions,
+            "fish_activity": fish_activity,
+            "visibility_light": visibility_light,
+            "notes": notes,
+        }
+
+        try:
+            response = save_log_entry(new_entry)
+
+            st.success("Log entry saved to Supabase!")
+            st.rerun()
+
+        except Exception as e:
+            st.error("Could not save log entry to Supabase.")
+            st.write(type(e).__name__)
+            st.write(e)
+
+    def show_accuracy_charts(activity_log):
+        """
+        Shows accuracy summaries and charts from the activity log.
+        """
+
+        chart_log = activity_log.copy()
+
+        numeric_columns = [
             "predicted_score",
             "actual_score_0_to_100",
             "prediction_error",
             "absolute_error",
         ]
-    )
 
-    if len(chart_log) == 0:
-        st.info("Not enough valid log data for summaries or charts yet.")
-        return
+        for column in numeric_columns:
+            chart_log[column] = pd.to_numeric(
+                chart_log[column],
+                errors="coerce",
+            )
 
-    st.subheader("Accuracy Summary by Activity")
-
-    summary = (
-        chart_log
-        .groupby("activity", as_index=False)
-        .agg(
-            number_of_logs=("activity", "count"),
-            average_error=("prediction_error", "mean"),
-            average_absolute_error=("absolute_error", "mean"),
+        chart_log["logged_at"] = pd.to_datetime(
+            chart_log["logged_at"],
+            errors="coerce",
         )
-    )
 
-    summary["average_error"] = summary["average_error"].round(1)
-    summary["average_absolute_error"] = summary["average_absolute_error"].round(1)
-
-    st.dataframe(summary, width="stretch")
-
-    st.subheader("Accuracy Charts")
-
-    st.write("### Average Absolute Error by Activity")
-    st.write("Lower is better.")
-
-    error_by_activity = (
-        chart_log
-        .groupby("activity", as_index=False)
-        .agg(
-            average_absolute_error=("absolute_error", "mean"),
-            average_error=("prediction_error", "mean"),
+        chart_log = chart_log.dropna(
+            subset=[
+                "logged_at",
+                "predicted_score",
+                "actual_score_0_to_100",
+                "prediction_error",
+                "absolute_error",
+            ]
         )
-    )
 
-    error_by_activity["average_absolute_error"] = (
-        error_by_activity["average_absolute_error"].round(1)
-    )
+        if len(chart_log) == 0:
+            st.info("Not enough valid log data for summaries or charts yet.")
+            return
 
-    error_by_activity["average_error"] = (
-        error_by_activity["average_error"].round(1)
-    )
+        st.subheader("Accuracy Summary by Activity")
 
-    st.bar_chart(
-        error_by_activity.set_index("activity")["average_absolute_error"]
-    )
+        summary = (
+            chart_log
+            .groupby("activity", as_index=False)
+            .agg(
+                number_of_logs=("activity", "count"),
+                average_error=("prediction_error", "mean"),
+                average_absolute_error=("absolute_error", "mean"),
+            )
+        )
 
-    st.write("### Average Error by Activity")
-    st.write(
-        "Positive means the activity was better than predicted. "
-        "Negative means it was worse than predicted."
-    )
+        summary["average_error"] = summary["average_error"].round(1)
+        summary["average_absolute_error"] = summary["average_absolute_error"].round(1)
 
-    st.bar_chart(
-        error_by_activity.set_index("activity")["average_error"]
-    )
+        st.dataframe(summary, width="stretch")
 
-    st.write("### Predicted vs. Actual Over Time")
+        st.subheader("Accuracy Charts")
 
-    chart_activity_options = ["All"] + sorted(
-        chart_log["activity"].dropna().unique().tolist()
-    )
+        st.write("### Average Absolute Error by Activity")
+        st.write("Lower is better.")
 
-    selected_chart_activity = st.selectbox(
-        "Choose activity for accuracy chart",
-        options=chart_activity_options,
-    )
+        error_by_activity = (
+            chart_log
+            .groupby("activity", as_index=False)
+            .agg(
+                average_absolute_error=("absolute_error", "mean"),
+                average_error=("prediction_error", "mean"),
+            )
+        )
 
-    if selected_chart_activity == "All":
-        selected_chart_log = chart_log.copy()
-    else:
-        selected_chart_log = chart_log[
-            chart_log["activity"] == selected_chart_activity
+        error_by_activity["average_absolute_error"] = (
+            error_by_activity["average_absolute_error"].round(1)
+        )
+
+        error_by_activity["average_error"] = (
+            error_by_activity["average_error"].round(1)
+        )
+
+        st.bar_chart(
+            error_by_activity.set_index("activity")["average_absolute_error"]
+        )
+
+        st.write("### Average Error by Activity")
+        st.write(
+            "Positive means the activity was better than predicted. "
+            "Negative means it was worse than predicted."
+        )
+
+        st.bar_chart(
+            error_by_activity.set_index("activity")["average_error"]
+        )
+
+        st.write("### Predicted vs. Actual Over Time")
+
+        chart_activity_options = ["All"] + sorted(
+            chart_log["activity"].dropna().unique().tolist()
+        )
+
+        selected_chart_activity = st.selectbox(
+            "Choose activity for accuracy chart",
+            options=chart_activity_options,
+        )
+
+        if selected_chart_activity == "All":
+            selected_chart_log = chart_log.copy()
+        else:
+            selected_chart_log = chart_log[
+                chart_log["activity"] == selected_chart_activity
+            ].copy()
+
+        selected_chart_log = selected_chart_log.sort_values("logged_at")
+
+        if len(selected_chart_log) == 0:
+            st.info("No logs for this activity yet.")
+            return
+
+        predicted_vs_actual = selected_chart_log[
+            [
+                "logged_at",
+                "predicted_score",
+                "actual_score_0_to_100",
+            ]
         ].copy()
 
-    selected_chart_log = selected_chart_log.sort_values("logged_at")
+        predicted_vs_actual = predicted_vs_actual.set_index("logged_at")
 
-    if len(selected_chart_log) == 0:
-        st.info("No logs for this activity yet.")
-        return
+        st.line_chart(predicted_vs_actual)
 
-    predicted_vs_actual = selected_chart_log[
-        [
-            "logged_at",
-            "predicted_score",
-            "actual_score_0_to_100",
-        ]
-    ].copy()
+        st.write("### Prediction Error Over Time")
 
-    predicted_vs_actual = predicted_vs_actual.set_index("logged_at")
+        error_over_time = selected_chart_log[
+            [
+                "logged_at",
+                "prediction_error",
+            ]
+        ].copy()
 
-    st.line_chart(predicted_vs_actual)
+        error_over_time = error_over_time.set_index("logged_at")
 
-    st.write("### Prediction Error Over Time")
-
-    error_over_time = selected_chart_log[
-        [
-            "logged_at",
-            "prediction_error",
-        ]
-    ].copy()
-
-    error_over_time = error_over_time.set_index("logged_at")
-
-    st.line_chart(error_over_time)
+        st.line_chart(error_over_time)
 
 # -------------------------
 # Show history
 # -------------------------
+with history_tab:
+    st.header("Prediction vs. Actual History")
 
-st.header("Prediction vs. Actual History")
+    activity_log = load_activity_log()
 
-activity_log = load_activity_log()
+    if len(activity_log) == 0:
+        st.info("No activity logs yet. Save your first entry above.")
 
-if len(activity_log) == 0:
-    st.info("No activity logs yet. Save your first entry above.")
+    else:
+        st.dataframe(
+            activity_log.sort_values("logged_at", ascending=False),
+            width="stretch",
+        )
 
-else:
-    st.dataframe(
-        activity_log.sort_values("logged_at", ascending=False),
-        width="stretch",
-    )
-    st.subheader("Manage Log Entries")
+        show_accuracy_charts(activity_log)
 
-    if "id" not in activity_log.columns:
+        st.write(
+            """
+            **How to read this:**
+
+            - Positive error means the activity was better than predicted.
+            - Negative error means it was worse than predicted.
+            - Lower average absolute error means your model is more accurate.
+            """
+        )
+
+        activity_log_csv = activity_log.to_csv(index=False)
+
+        st.download_button(
+            label="Download activity log as CSV",
+            data=activity_log_csv,
+            file_name="activity_log.csv",
+            mime="text/csv",
+        )
+
+
+with manage_tab:
+    st.header("Manage Logs")
+
+    activity_log = load_activity_log()
+
+    if len(activity_log) == 0:
+        st.info("No log entries available to manage.")
+
+    elif "id" not in activity_log.columns:
         st.warning("Log IDs are not available, so entries cannot be edited or deleted yet.")
 
     else:
@@ -3560,24 +3590,3 @@ else:
 
             else:
                 st.warning("Check the confirmation box before deleting.")
-
-    show_accuracy_charts(activity_log)
-
-    st.write(
-        """
-        **How to read this:**
-
-        - Positive error means the activity was better than predicted.
-        - Negative error means it was worse than predicted.
-        - Lower average absolute error means your model is more accurate.
-        """
-    )
-
-    activity_log_csv = activity_log.to_csv(index=False)
-
-    st.download_button(
-        label="Download activity log as CSV",
-        data=activity_log_csv,
-        file_name="activity_log.csv",
-        mime="text/csv",
-    )
