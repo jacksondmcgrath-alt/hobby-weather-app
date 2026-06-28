@@ -2358,6 +2358,68 @@ def delete_log_entry(log_id):
 
     supabase.table("activity_logs").delete().eq("id", log_id).execute()
 
+def update_log_entry(log_id, updated_entry):
+    """
+    Updates one activity log entry in Supabase by id.
+    """
+
+    supabase = get_supabase_client()
+
+    allowed_columns = [
+        "actual_time",
+        "followed_recommended_window",
+        "actual_enjoyment_1_to_10",
+        "actual_score_0_to_100",
+        "prediction_error",
+        "absolute_error",
+        "did_i_go",
+        "actual_bugs_1_to_10",
+        "actual_wind_annoyance_1_to_10",
+        "actual_humidity_comfort_1_to_10",
+        "actual_ground_wetness",
+        "actual_water_conditions",
+        "fish_activity",
+        "visibility_light",
+        "notes",
+    ]
+
+    numeric_columns = [
+        "actual_enjoyment_1_to_10",
+        "actual_score_0_to_100",
+        "prediction_error",
+        "absolute_error",
+        "actual_bugs_1_to_10",
+        "actual_wind_annoyance_1_to_10",
+        "actual_humidity_comfort_1_to_10",
+    ]
+
+    clean_entry = {}
+
+    for column in allowed_columns:
+        value = updated_entry.get(column, None)
+
+        if value == "" or value is None:
+            clean_entry[column] = None
+
+        elif column in numeric_columns:
+            try:
+                clean_entry[column] = float(value)
+            except Exception:
+                clean_entry[column] = None
+
+        else:
+            clean_entry[column] = str(value)
+
+    response = (
+        supabase
+        .table("activity_logs")
+        .update(clean_entry)
+        .eq("id", log_id)
+        .execute()
+    )
+
+    return response
+
 # =========================
 # Streamlit user interface
 # =========================
@@ -3226,11 +3288,10 @@ else:
         activity_log.sort_values("logged_at", ascending=False),
         width="stretch",
     )
-
     st.subheader("Manage Log Entries")
 
     if "id" not in activity_log.columns:
-        st.warning("Log IDs are not available, so entries cannot be deleted yet.")
+        st.warning("Log IDs are not available, so entries cannot be edited or deleted yet.")
 
     else:
         manage_log = activity_log.copy()
@@ -3257,6 +3318,8 @@ else:
             manage_log["display_label"] == selected_log_label
         ].iloc[0]
 
+        selected_log_id = int(selected_log["id"])
+
         st.write("Selected log:")
 
         st.dataframe(
@@ -3264,14 +3327,233 @@ else:
             width="stretch",
         )
 
-        confirm_delete = st.checkbox(
-            "Yes, I want to delete this log entry",
-            key="confirm_delete_log",
+        st.markdown("---")
+        st.write("### Edit Selected Log")
+
+        def safe_int_value(value, default=5):
+            try:
+                if pd.isna(value):
+                    return default
+                return int(float(value))
+            except Exception:
+                return default
+
+        def safe_text_value(value, default=""):
+            try:
+                if pd.isna(value):
+                    return default
+                return str(value)
+            except Exception:
+                return default
+
+        def safe_option_value(value, options, default):
+            value = safe_text_value(value, default)
+
+            if value in options:
+                return value
+
+            return default
+
+        actual_time_edit = st.text_input(
+            "Actual time",
+            value=safe_text_value(selected_log.get("actual_time", "")),
+            key=f"edit_actual_time_{selected_log_id}",
         )
 
-        if st.button("Delete selected log entry", key="delete_log_button"):
+        followed_options = ["Not sure", "Yes", "No", "Partially"]
+
+        followed_recommended_window_edit = st.selectbox(
+            "Did you go during the recommended time window?",
+            options=followed_options,
+            index=followed_options.index(
+                safe_option_value(
+                    selected_log.get("followed_recommended_window", "Not sure"),
+                    followed_options,
+                    "Not sure",
+                )
+            ),
+            key=f"edit_followed_window_{selected_log_id}",
+        )
+
+        enjoyment_edit = st.slider(
+            "Actual enjoyment score",
+            min_value=1,
+            max_value=10,
+            value=safe_int_value(
+                selected_log.get("actual_enjoyment_1_to_10", 7),
+                default=7,
+            ),
+            key=f"edit_enjoyment_{selected_log_id}",
+        )
+
+        did_i_go_options = ["Yes", "No", "Partially"]
+
+        did_i_go_edit = st.selectbox(
+            "Did you actually do this activity?",
+            options=did_i_go_options,
+            index=did_i_go_options.index(
+                safe_option_value(
+                    selected_log.get("did_i_go", "Yes"),
+                    did_i_go_options,
+                    "Yes",
+                )
+            ),
+            key=f"edit_did_i_go_{selected_log_id}",
+        )
+
+        actual_bugs_edit = st.slider(
+            "Actual bugs",
+            min_value=0,
+            max_value=10,
+            value=safe_int_value(
+                selected_log.get("actual_bugs_1_to_10", 5),
+                default=5,
+            ),
+            key=f"edit_bugs_{selected_log_id}",
+        )
+
+        actual_wind_annoyance_edit = st.slider(
+            "Actual wind annoyance",
+            min_value=0,
+            max_value=10,
+            value=safe_int_value(
+                selected_log.get("actual_wind_annoyance_1_to_10", 5),
+                default=5,
+            ),
+            key=f"edit_wind_{selected_log_id}",
+        )
+
+        actual_humidity_comfort_edit = st.slider(
+            "Actual humidity comfort",
+            min_value=0,
+            max_value=10,
+            value=safe_int_value(
+                selected_log.get("actual_humidity_comfort_1_to_10", 7),
+                default=7,
+            ),
+            key=f"edit_humidity_{selected_log_id}",
+        )
+
+        ground_options = ["Dry", "Damp", "Muddy", "Very muddy", "Not sure", "Not applicable"]
+
+        actual_ground_wetness_edit = st.selectbox(
+            "Actual ground/course/trail condition",
+            options=ground_options,
+            index=ground_options.index(
+                safe_option_value(
+                    selected_log.get("actual_ground_wetness", "Not applicable"),
+                    ground_options,
+                    "Not applicable",
+                )
+            ),
+            key=f"edit_ground_{selected_log_id}",
+        )
+
+        water_options = ["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure", "Not applicable"]
+
+        actual_water_conditions_edit = st.selectbox(
+            "Actual water conditions",
+            options=water_options,
+            index=water_options.index(
+                safe_option_value(
+                    selected_log.get("actual_water_conditions", "Not applicable"),
+                    water_options,
+                    "Not applicable",
+                )
+            ),
+            key=f"edit_water_{selected_log_id}",
+        )
+
+        fish_options = ["None", "Low", "Medium", "High", "Not sure", "Not applicable"]
+
+        fish_activity_edit = st.selectbox(
+            "Fish activity",
+            options=fish_options,
+            index=fish_options.index(
+                safe_option_value(
+                    selected_log.get("fish_activity", "Not applicable"),
+                    fish_options,
+                    "Not applicable",
+                )
+            ),
+            key=f"edit_fish_{selected_log_id}",
+        )
+
+        visibility_options = ["Bright daylight", "Low light but okay", "Too dark", "Not sure", "Not applicable"]
+
+        visibility_light_edit = st.selectbox(
+            "Visibility/light conditions",
+            options=visibility_options,
+            index=visibility_options.index(
+                safe_option_value(
+                    selected_log.get("visibility_light", "Not applicable"),
+                    visibility_options,
+                    "Not applicable",
+                )
+            ),
+            key=f"edit_visibility_{selected_log_id}",
+        )
+
+        notes_edit = st.text_area(
+            "Notes",
+            value=safe_text_value(selected_log.get("notes", "")),
+            key=f"edit_notes_{selected_log_id}",
+        )
+
+        predicted_score_for_edit = selected_log.get("predicted_score", None)
+        actual_score_edit = enjoyment_edit * 10
+
+        try:
+            if pd.isna(predicted_score_for_edit):
+                prediction_error_edit = None
+                absolute_error_edit = None
+            else:
+                prediction_error_edit = actual_score_edit - float(predicted_score_for_edit)
+                absolute_error_edit = abs(prediction_error_edit)
+        except Exception:
+            prediction_error_edit = None
+            absolute_error_edit = None
+
+        if st.button("Save edits to selected log", key=f"save_edits_{selected_log_id}"):
+            updated_entry = {
+                "actual_time": actual_time_edit,
+                "followed_recommended_window": followed_recommended_window_edit,
+                "actual_enjoyment_1_to_10": enjoyment_edit,
+                "actual_score_0_to_100": actual_score_edit,
+                "prediction_error": prediction_error_edit,
+                "absolute_error": absolute_error_edit,
+                "did_i_go": did_i_go_edit,
+                "actual_bugs_1_to_10": actual_bugs_edit,
+                "actual_wind_annoyance_1_to_10": actual_wind_annoyance_edit,
+                "actual_humidity_comfort_1_to_10": actual_humidity_comfort_edit,
+                "actual_ground_wetness": actual_ground_wetness_edit,
+                "actual_water_conditions": actual_water_conditions_edit,
+                "fish_activity": fish_activity_edit,
+                "visibility_light": visibility_light_edit,
+                "notes": notes_edit,
+            }
+
+            try:
+                update_log_entry(selected_log_id, updated_entry)
+                st.success("Log entry updated.")
+                st.rerun()
+
+            except Exception as e:
+                st.error("Could not update log entry.")
+                st.write(type(e).__name__)
+                st.write(e)
+
+        st.markdown("---")
+        st.write("### Delete Selected Log")
+
+        confirm_delete = st.checkbox(
+            "Yes, I want to delete this log entry",
+            key=f"confirm_delete_log_{selected_log_id}",
+        )
+
+        if st.button("Delete selected log entry", key=f"delete_log_button_{selected_log_id}"):
             if confirm_delete:
-                delete_log_entry(int(selected_log["id"]))
+                delete_log_entry(selected_log_id)
 
                 st.success("Log entry deleted.")
                 st.rerun()
