@@ -1,0 +1,7 @@
+.streamlit/secrets.toml
+activity_log.csv
+prediction_history.csv
+preferences.json
+__pycache__/
+.venv
+.env
