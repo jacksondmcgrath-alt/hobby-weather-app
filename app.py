@@ -2233,6 +2233,7 @@ def load_activity_log():
     """
 
     columns = [
+        "id",
         "logged_at",
         "date",
         "activity",
@@ -2347,6 +2348,15 @@ def save_log_entry(new_entry):
     response = supabase.table("activity_logs").insert(clean_entry).execute()
 
     return response
+
+def delete_log_entry(log_id):
+    """
+    Deletes one activity log entry from Supabase by id.
+    """
+
+    supabase = get_supabase_client()
+
+    supabase.table("activity_logs").delete().eq("id", log_id).execute()
 
 # =========================
 # Streamlit user interface
@@ -3217,6 +3227,58 @@ else:
         width="stretch",
     )
 
+    st.subheader("Manage Log Entries")
+
+    if "id" not in activity_log.columns:
+        st.warning("Log IDs are not available, so entries cannot be deleted yet.")
+
+    else:
+        manage_log = activity_log.copy()
+
+        manage_log["display_label"] = (
+            manage_log["id"].astype(str)
+            + " | "
+            + manage_log["date"].astype(str)
+            + " | "
+            + manage_log["activity"].astype(str)
+            + " | score "
+            + manage_log["actual_enjoyment_1_to_10"].astype(str)
+            + " | "
+            + manage_log["notes"].fillna("").astype(str).str.slice(0, 40)
+        )
+
+        selected_log_label = st.selectbox(
+            "Choose a log entry to manage",
+            options=manage_log["display_label"].tolist(),
+            key="manage_log_selectbox",
+        )
+
+        selected_log = manage_log[
+            manage_log["display_label"] == selected_log_label
+        ].iloc[0]
+
+        st.write("Selected log:")
+
+        st.dataframe(
+            pd.DataFrame([selected_log.drop(labels=["display_label"])]),
+            width="stretch",
+        )
+
+        confirm_delete = st.checkbox(
+            "Yes, I want to delete this log entry",
+            key="confirm_delete_log",
+        )
+
+        if st.button("Delete selected log entry", key="delete_log_button"):
+            if confirm_delete:
+                delete_log_entry(int(selected_log["id"]))
+
+                st.success("Log entry deleted.")
+                st.rerun()
+
+            else:
+                st.warning("Check the confirmation box before deleting.")
+
     show_accuracy_charts(activity_log)
 
     st.write(
@@ -3224,16 +3286,16 @@ else:
         **How to read this:**
 
         - Positive error means the activity was better than predicted.
-        - Negative error means the activity was worse than predicted.
+        - Negative error means it was worse than predicted.
         - Lower average absolute error means your model is more accurate.
         """
     )
 
-activity_log_csv = activity_log.to_csv(index=False)
+    activity_log_csv = activity_log.to_csv(index=False)
 
-st.download_button(
-    label="Download activity log as CSV",
-    data=activity_log_csv,
-    file_name="activity_log.csv",
-    mime="text/csv",
-)
+    st.download_button(
+        label="Download activity log as CSV",
+        data=activity_log_csv,
+        file_name="activity_log.csv",
+        mime="text/csv",
+    )
