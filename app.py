@@ -2054,6 +2054,7 @@ def apply_preference_adjustments(predictions, preferences):
 # Activity log functions
 # =========================
 
+@st.cache_data(ttl=300)
 def load_prediction_history():
     """
     Loads saved prediction history from Supabase.
@@ -2227,6 +2228,7 @@ def find_saved_prediction(predictions, selected_date, selected_activity):
 
     return None
 
+@st.cache_data(ttl=60)
 def load_activity_log():
     """
     Loads activity logs from Supabase.
@@ -2689,7 +2691,16 @@ try:
         preferences=preferences,
     )
 
-    save_prediction_history(predictions)
+    prediction_save_key = (
+    f"{latitude}_{longitude}_{forecast_days}_"
+    f"{manual_water_temp}_"
+    f"{predictions['date'].min()}_{predictions['date'].max()}_"
+    f"{tuple(sorted(preferences.items()))}"
+    )
+
+    if st.session_state.get("last_prediction_save_key") != prediction_save_key:
+        save_prediction_history(predictions)
+        st.session_state["last_prediction_save_key"] = prediction_save_key
     # Reuse cached weather data for hourly time recommendations
     hourly_weather_for_times = fetch_weather_forecast(
         latitude=latitude,
@@ -2722,6 +2733,8 @@ forecast_tab, times_tab, log_tab, history_tab, manage_tab = st.tabs(
         "Manage Logs",
     ]
 )
+
+activity_log = load_activity_log()
 
 # -------------------------
 # Display predictions
@@ -3123,6 +3136,7 @@ with log_tab:
 
         try:
             response = save_log_entry(new_entry)
+            load_activity_log.clear()
 
             st.success("Log entry saved to Supabase!")
             st.rerun()
@@ -3279,8 +3293,6 @@ with log_tab:
 with history_tab:
     st.header("Prediction vs. Actual History")
 
-    activity_log = load_activity_log()
-
     if len(activity_log) == 0:
         st.info("No activity logs yet. Save your first entry above.")
 
@@ -3314,8 +3326,6 @@ with history_tab:
 
 with manage_tab:
     st.header("Manage Logs")
-
-    activity_log = load_activity_log()
 
     if len(activity_log) == 0:
         st.info("No log entries available to manage.")
@@ -3565,6 +3575,7 @@ with manage_tab:
 
             try:
                 update_log_entry(selected_log_id, updated_entry)
+                load_activity_log.clear()
                 st.success("Log entry updated.")
                 st.rerun()
 
@@ -3584,6 +3595,7 @@ with manage_tab:
         if st.button("Delete selected log entry", key=f"delete_log_button_{selected_log_id}"):
             if confirm_delete:
                 delete_log_entry(selected_log_id)
+                load_activity_log.clear()
 
                 st.success("Log entry deleted.")
                 st.rerun()
