@@ -162,6 +162,26 @@ def get_supabase_client():
 def clamp_score(score):
     return max(0, min(100, score))
 
+ACTIVITY_ICONS = {
+    "Fishing": "🎣",
+    "Bass Fishing": "🐟",
+    "Trout Fishing": "🐟",
+    "Walleye Fishing": "🐟",
+    "Pike Fishing": "🐟",
+    "Panfish Fishing": "🐟",
+    "Camping": "⛺",
+    "Running": "🏃",
+    "Kayaking": "🛶",
+    "Disc Golf": "🥏",
+}
+
+
+def activity_label(activity):
+    """
+    Returns activity name with icon.
+    """
+
+    return f"{ACTIVITY_ICONS.get(activity, '⭐')} {activity}"
 
 def safe_value(value, default=0):
     if pd.isna(value):
@@ -218,7 +238,147 @@ def score_label(score):
         return "Okay"
     return "Poor"
 
+def score_color(score):
+    """
+    Returns a color name based on score.
+    """
 
+    if score >= 80:
+        return "green"
+    if score >= 60:
+        return "orange"
+    if score >= 40:
+        return "red"
+    return "gray"
+
+
+def score_badge_html(score, label=None):
+    """
+    Creates a simple colored score badge.
+    """
+
+    color_map = {
+        "green": "#1f8f4d",
+        "orange": "#d9822b",
+        "red": "#c0392b",
+        "gray": "#6c757d",
+    }
+
+    color = color_map[score_color(score)]
+
+    if label is None:
+        label = score_label(score)
+
+    return f"""
+    <span style="
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background-color: {color};
+        color: white;
+        font-weight: 700;
+        font-size: 0.9rem;
+    ">
+        {score} · {label}
+    </span>
+    """
+
+
+def get_best_activity_for_date(predictions, forecast_date):
+    """
+    Returns the highest scoring activity for one date.
+    """
+
+    day_predictions = predictions[
+        predictions["date"] == forecast_date
+    ].copy()
+
+    if len(day_predictions) == 0:
+        return None
+
+    best_index = day_predictions["predicted_score"].idxmax()
+
+    return day_predictions.loc[best_index]
+
+
+def build_best_by_day_table(predictions, time_recommendations):
+    """
+    Builds a simple table showing the best activity for each date.
+    """
+
+    rows = []
+
+    for forecast_date in sorted(predictions["date"].unique()):
+        best_row = get_best_activity_for_date(predictions, forecast_date)
+
+        if best_row is None:
+            continue
+
+        recommended_window, window_score = get_recommended_window_for_activity(
+            time_recommendations=time_recommendations,
+            selected_date=forecast_date,
+            selected_activity=best_row["activity"],
+        )
+
+        rows.append({
+            "Date": forecast_date,
+            "Best Activity": best_row["activity"],
+            "Score": best_row["predicted_score"],
+            "Label": best_row["label"],
+            "Recommended Window": recommended_window,
+            "Weather Snapshot": (
+                f"{best_row.get('avg_temp', 'N/A')}°F, "
+                f"wind {best_row.get('wind_max', 'N/A')} mph, "
+                f"rain {best_row.get('rain_chance', 'N/A')}%"
+            ),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def get_top_activities_for_date(predictions, forecast_date, n=3):
+    """
+    Returns top N activities for a date.
+    """
+
+    day_predictions = predictions[
+        predictions["date"] == forecast_date
+    ].copy()
+
+    return day_predictions.sort_values(
+        "predicted_score",
+        ascending=False,
+    ).head(n)
+
+
+def dashboard_warning_text(row):
+    """
+    Creates simple warning text based on weather fields.
+    """
+
+    warnings = []
+
+    rain_chance = row.get("rain_chance", 0)
+    wind_max = row.get("wind_max", 0)
+    bug_index = row.get("bug_index", 0)
+    storm_risk = row.get("storm_risk", "")
+
+    if rain_chance >= 60:
+        warnings.append("Rain risk")
+
+    if wind_max >= 18:
+        warnings.append("Windy")
+
+    if bug_index >= 65:
+        warnings.append("Buggy")
+
+    if isinstance(storm_risk, str) and storm_risk not in ["Low storm risk", ""]:
+        warnings.append(storm_risk)
+
+    if len(warnings) == 0:
+        return "No major warnings."
+
+    return " • ".join(warnings)
 # =========================
 # Weather fetching
 # =========================
@@ -2672,7 +2832,6 @@ for key, default_value in DEFAULT_SETTINGS.items():
     if key not in st.session_state:
         st.session_state[key] = saved_settings.get(key, default_value)
 
-
 st.sidebar.header("Forecast Settings")
 
 st.sidebar.write("Search for a location or manually enter coordinates.")
@@ -2955,11 +3114,11 @@ except Exception as e:
 
 forecast_tab, times_tab, log_tab, history_tab, manage_tab = st.tabs(
     [
-        "Forecast",
-        "Best Times",
-        "Log Activity",
-        "History & Charts",
-        "Manage Logs",
+        "📊 Forecast",
+        "⏰ Best Times",
+        "➕ Log Activity",
+        "📈 History",
+        "🛠️ Manage Logs",
     ]
 )
 
@@ -2980,37 +3139,166 @@ with forecast_tab:
         default=activities,
     )
 
+    show_all_activity_details = st.checkbox(
+        "Show all activity details",
+        value=False,
+    )
+
     filtered_predictions = predictions[
         predictions["activity"].isin(selected_activities)
     ].copy()
 
+    st.subheader("Dashboard")
+
+    best_by_day = build_best_by_day_table(
+        predictions=filtered_predictions,
+        time_recommendations=time_recommendations,
+    )
+
+    if len(best_by_day) > 0:
+        today_best = best_by_day.iloc[0]
+
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+        with metric_col1:
+            st.metric(
+                "Next Best Activity",
+                today_best["Best Activity"],
+                today_best["Label"],
+            )
+
+        with metric_col2:
+            st.metric(
+                "Score",
+                int(today_best["Score"]),
+            )
+
+        with metric_col3:
+            st.metric(
+                "Best Window",
+                today_best["Recommended Window"],
+            )
+
+        st.write("### Best Activity by Day")
+
+        st.dataframe(
+            best_by_day,
+            width="stretch",
+        )
+
+        # Best Fishing Target goes here
+        fishing_species = [
+            "Bass Fishing",
+            "Trout Fishing",
+            "Walleye Fishing",
+            "Pike Fishing",
+            "Panfish Fishing",
+        ]
+
+        species_predictions = filtered_predictions[
+            filtered_predictions["activity"].isin(fishing_species)
+        ].copy()
+
+        if len(species_predictions) > 0:
+            best_species_index = species_predictions["predicted_score"].idxmax()
+            best_species = species_predictions.loc[best_species_index]
+
+            st.write("### Best Fishing Target")
+
+            species_col1, species_col2, species_col3 = st.columns(3)
+
+            with species_col1:
+                st.metric(
+                    "Target",
+                    best_species["activity"],
+                )
+
+            with species_col2:
+                st.metric(
+                    "Score",
+                    int(best_species["predicted_score"]),
+                    best_species["label"],
+                )
+
+            with species_col3:
+                species_window, _ = get_recommended_window_for_activity(
+                    time_recommendations=time_recommendations,
+                    selected_date=best_species["date"],
+                    selected_activity=best_species["activity"],
+                )
+
+                st.metric(
+                    "Best Window",
+                    species_window,
+                )
+
     if phone_friendly_view:
         for forecast_date in sorted(filtered_predictions["date"].unique()):
             st.subheader(forecast_date)
+            top_three = get_top_activities_for_date(
+                filtered_predictions,
+                forecast_date,
+                n=3,
+            )
+
+            top_cols = st.columns(3)
+
+            for col, (_, top_row) in zip(top_cols, top_three.iterrows()):
+                with col:
+                    st.markdown(
+                        score_badge_html(
+                            top_row["predicted_score"],
+                            top_row["label"],
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                    st.write(f"**{activity_label(top_row['activity'])}**")
 
             day_predictions = filtered_predictions[
                 filtered_predictions["date"] == forecast_date
             ].sort_values("predicted_score", ascending=False)
 
-            for _, row in day_predictions.iterrows():
+            if show_all_activity_details:
+                display_day_predictions = day_predictions
+            else:
+                display_day_predictions = day_predictions.head(3)
+
+            for _, row in display_day_predictions.iterrows():
                 recommended_window, window_score = get_recommended_window_for_activity(
                     time_recommendations=time_recommendations,
                     selected_date=row["date"],
                     selected_activity=row["activity"],
                 )
-
+            if not show_all_activity_details and len(day_predictions) > 3:
+                st.caption("Showing top 3 activities. Check 'Show all activity details' to view everything.")
                 title = (
-                    f"{row['activity']}: {row['predicted_score']} "
+                    f"{activity_label(row['activity'])}: {row['predicted_score']} "
                     f"({row['label']})"
                 )
 
                 with st.expander(title):
-                    st.write(f"**Base score:** {row.get('base_predicted_score', row['predicted_score'])}")
-                    st.write(f"**Preference adjustment:** {row.get('preference_adjustment', 0)}")
+                    st.markdown(
+                        score_badge_html(
+                            row["predicted_score"],
+                            row["label"],
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
                     st.write(f"**Recommended window:** {recommended_window}")
 
                     if window_score is not None:
                         st.write(f"**Window score:** {window_score}")
+
+                    st.write(
+                        f"**Weather:** {row.get('avg_temp', 'N/A')}°F, "
+                        f"wind {row.get('wind_max', 'N/A')} mph, "
+                        f"gusts {row.get('gust_max', 'N/A')} mph, "
+                        f"rain {row.get('rain_chance', 'N/A')}%, "
+                        f"bugs {row.get('bug_index', 'N/A')}"
+                    )
+
+                    st.write(f"**Warnings:** {dashboard_warning_text(row)}")
 
                     st.write("**Why this score:**")
                     st.write(row["explanation"])
@@ -3018,11 +3306,9 @@ with forecast_tab:
                     st.write("**Gear / Safety Notes:**")
                     st.write(row["gear_notes"])
 
-                    st.write(
-                        f"Temp: {row.get('avg_temp', 'N/A')}°F | "
-                        f"Wind: {row.get('wind_max', 'N/A')} mph | "
-                        f"Rain: {row.get('rain_chance', 'N/A')}% | "
-                        f"Bugs: {row.get('bug_index', 'N/A')}"
+                    st.caption(
+                        f"Base score: {row.get('base_predicted_score', row['predicted_score'])} | "
+                        f"Preference adjustment: {row.get('preference_adjustment', 0)}"
                     )
     else:
         st.dataframe(
@@ -3261,70 +3547,71 @@ with log_tab:
         options=["Yes", "No", "Partially"],
     )
 
-    st.subheader("Actual Conditions")
+    with st.expander("Optional actual conditions", expanded=False):
+        st.subheader("Actual Conditions")
 
-    actual_time = st.text_input(
-        "What time did you actually go?",
-        placeholder="Example: 7:30 AM or 6:00 PM",
-    )
-
-    followed_recommended_window = st.selectbox(
-        "Did you go during the recommended time window?",
-        options=["Not sure", "Yes", "No", "Partially"],
-    )
-
-    actual_bugs = st.slider(
-        "Actual bugs",
-        min_value=0,
-        max_value=10,
-        value=5,
-        help="0 = no bugs, 10 = terrible bugs",
-    )
-
-    actual_wind_annoyance = st.slider(
-        "Actual wind annoyance",
-        min_value=0,
-        max_value=10,
-        value=5,
-        help="0 = no wind problem, 10 = wind ruined it",
-    )
-
-    actual_humidity_comfort = st.slider(
-        "Actual humidity comfort",
-        min_value=0,
-        max_value=10,
-        value=7,
-        help="0 = miserable humidity, 10 = very comfortable",
-    )
-
-    actual_ground_wetness = "Not applicable"
-    actual_water_conditions = "Not applicable"
-    fish_activity = "Not applicable"
-    visibility_light = "Not applicable"
-
-    if selected_activity in ["Camping", "Running", "Disc Golf"]:
-        actual_ground_wetness = st.selectbox(
-            "Actual ground/course/trail condition",
-            options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
+        actual_time = st.text_input(
+            "What time did you actually go?",
+            placeholder="Example: 7:30 AM or 6:00 PM",
         )
 
-    if selected_activity in FISHING_ACTIVITIES + ["Kayaking"]:
-        actual_water_conditions = st.selectbox(
-            "Actual water conditions",
-            options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
+        followed_recommended_window = st.selectbox(
+            "Did you go during the recommended time window?",
+            options=["Not sure", "Yes", "No", "Partially"],
         )
 
-    if selected_activity in FISHING_ACTIVITIES:
-        fish_activity = st.selectbox(
-            "Fish activity",
-            options=["None", "Low", "Medium", "High", "Not sure"],
+        actual_bugs = st.slider(
+            "Actual bugs",
+            min_value=0,
+            max_value=10,
+            value=5,
+            help="0 = no bugs, 10 = terrible bugs",
         )
 
-    if selected_activity == "Running":
-        visibility_light = st.selectbox(
-            "Visibility/light conditions",
-            options=["Bright daylight", "Low light but okay", "Too dark", "Not sure"],
+        actual_wind_annoyance = st.slider(
+            "Actual wind annoyance",
+            min_value=0,
+            max_value=10,
+            value=5,
+            help="0 = no wind problem, 10 = wind ruined it",
         )
+
+        actual_humidity_comfort = st.slider(
+            "Actual humidity comfort",
+            min_value=0,
+            max_value=10,
+            value=7,
+            help="0 = miserable humidity, 10 = very comfortable",
+        )
+
+        actual_ground_wetness = "Not applicable"
+        actual_water_conditions = "Not applicable"
+        fish_activity = "Not applicable"
+        visibility_light = "Not applicable"
+
+        if selected_activity in ["Camping", "Running", "Disc Golf"]:
+            actual_ground_wetness = st.selectbox(
+                "Actual ground/course/trail condition",
+                options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
+            )
+
+        if selected_activity in FISHING_ACTIVITIES + ["Kayaking"]:
+            actual_water_conditions = st.selectbox(
+                "Actual water conditions",
+                options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
+            )
+
+        if selected_activity in FISHING_ACTIVITIES:
+            fish_activity = st.selectbox(
+                "Fish activity",
+                options=["None", "Low", "Medium", "High", "Not sure"],
+            )
+
+        if selected_activity == "Running":
+            visibility_light = st.selectbox(
+                "Visibility/light conditions",
+                options=["Bright daylight", "Low light but okay", "Too dark", "Not sure"],
+            )
 
     notes = st.text_area(
         "Notes",
