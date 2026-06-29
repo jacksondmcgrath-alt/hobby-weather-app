@@ -534,6 +534,40 @@ def freshwater_water_temp_score(water_temp):
         absolute_high=84,
     )
 
+SPECIES_FISHING_PROFILES = {
+    "Bass Fishing": {
+        "ideal_water_temp": [60, 78],
+        "absolute_water_temp": [45, 88],
+        "bug_bonus": True,
+        "description": "Bass tend to favor warmer freshwater conditions.",
+    },
+    "Trout Fishing": {
+        "ideal_water_temp": [45, 60],
+        "absolute_water_temp": [35, 68],
+        "bug_bonus": True,
+        "description": "Trout generally prefer cooler water.",
+    },
+    "Walleye Fishing": {
+        "ideal_water_temp": [50, 70],
+        "absolute_water_temp": [38, 78],
+        "bug_bonus": False,
+        "description": "Walleye often do well in cooler to mild freshwater conditions.",
+    },
+    "Pike Fishing": {
+        "ideal_water_temp": [50, 65],
+        "absolute_water_temp": [35, 75],
+        "bug_bonus": False,
+        "description": "Pike often favor cooler to mild water.",
+    },
+    "Panfish Fishing": {
+        "ideal_water_temp": [60, 75],
+        "absolute_water_temp": [45, 85],
+        "bug_bonus": True,
+        "description": "Panfish often do well in mild to warm water.",
+    },
+}
+
+FISHING_ACTIVITIES = ["Fishing"] + list(SPECIES_FISHING_PROFILES.keys())
 
 def storm_safety_score(row):
     """
@@ -782,6 +816,21 @@ def common_gear_notes(row):
 
     return "; ".join(notes) + "."
 
+def species_water_temp_score(water_temp, species_profile):
+    """
+    Scores water temperature for a specific freshwater species.
+    """
+
+    ideal_low, ideal_high = species_profile["ideal_water_temp"]
+    absolute_low, absolute_high = species_profile["absolute_water_temp"]
+
+    return range_score(
+        value=water_temp,
+        ideal_low=ideal_low,
+        ideal_high=ideal_high,
+        absolute_low=absolute_low,
+        absolute_high=absolute_high,
+    )
 
 def score_fishing(row):
     temp_score = range_score(row["temp_avg"], 50, 75, 35, 90)
@@ -833,6 +882,103 @@ def score_fishing(row):
 
     return round(clamp_score(score)), explanation
 
+def score_species_fishing(row, species_name, species_profile):
+    """
+    Scores fishing for a specific freshwater species.
+
+    Uses the general fishing model, but gives more importance to
+    species-specific water temperature.
+    """
+
+    temp_score = range_score(
+        value=row["temp_avg"],
+        ideal_low=50,
+        ideal_high=75,
+        absolute_low=35,
+        absolute_high=90,
+    )
+
+    wind_score = fishing_wind_score(row["wind_max"])
+
+    bug_score = fishing_bug_score(row["bug_activity_index"])
+
+    rain_score = low_is_good_score(
+        value=row["precip_probability_max"],
+        ideal_max=30,
+        bad_at=85,
+    )
+
+    pressure_score = fishing_pressure_score(
+        row["pressure_avg"],
+        row["pressure_change"],
+    )
+
+    water_score = range_score(
+        value=row["estimated_water_temp"],
+        ideal_low=species_profile["ideal_water_temp"][0],
+        ideal_high=species_profile["ideal_water_temp"][1],
+        absolute_low=species_profile["absolute_water_temp"][0],
+        absolute_high=species_profile["absolute_water_temp"][1],
+    )
+
+    storm_score = row["storm_safety_score"]
+
+    # Species-specific weighting:
+    # water temperature matters more here than in general fishing.
+    score = (
+        water_score * 0.30 +
+        temp_score * 0.15 +
+        wind_score * 0.15 +
+        pressure_score * 0.15 +
+        rain_score * 0.08 +
+        storm_score * 0.08 +
+        row["air_quality_score"] * 0.03 +
+        row["uv_score"] * 0.02
+    )
+
+    # Some species/approaches benefit more from insect activity.
+    if species_profile.get("bug_bonus", False):
+        score += bug_score * 0.04
+
+    # Safety cap
+    if storm_score < 40:
+        score = min(score, 45)
+
+    reasons = []
+
+    ideal_low, ideal_high = species_profile["ideal_water_temp"]
+
+    if ideal_low <= row["estimated_water_temp"] <= ideal_high:
+        reasons.append(
+            f"water temperature is in the preferred range for {species_name.lower()}"
+        )
+
+    if 4 <= row["wind_max"] <= 12:
+        reasons.append("a good light chop")
+
+    if -6 <= row["pressure_change"] <= -1:
+        reasons.append("slightly falling pressure")
+    elif -1 < row["pressure_change"] <= 2:
+        reasons.append("stable pressure")
+
+    if species_profile.get("bug_bonus", False) and 35 <= row["bug_activity_index"] <= 75:
+        reasons.append("good insect activity")
+
+    if row["storm_safety_score"] < 60:
+        reasons.append("storm risk is hurting the score")
+
+    if len(reasons) == 0:
+        explanation = f"Mixed conditions for {species_name.lower()}."
+    else:
+        explanation = (
+            f"{species_name} score is driven by "
+            + ", ".join(reasons)
+            + "."
+        )
+
+    explanation += f" {species_profile['description']}"
+
+    return round(clamp_score(score)), explanation
 
 def score_camping(row):
     temp_score = range_score(row["temp_avg"], 70, 80, 50, 95)
@@ -1110,8 +1256,10 @@ def score_disc_golf(row):
 def generate_predictions(latitude, longitude, days, manual_water_temp):
     """
     Full automatic prediction pipeline.
-    Now includes:
+
+    Includes:
     - Fishing
+    - Species-specific fishing
     - Camping
     - Running
     - Kayaking
@@ -1149,6 +1297,10 @@ def generate_predictions(latitude, longitude, days, manual_water_temp):
             "storm_risk": row["storm_risk"],
         }
 
+        # ---------------------
+        # General Fishing
+        # ---------------------
+
         rows.append({
             "date": row["date"],
             "activity": "Fishing",
@@ -1158,6 +1310,31 @@ def generate_predictions(latitude, longitude, days, manual_water_temp):
             "gear_notes": gear_notes,
             **common_weather,
         })
+
+        # ---------------------
+        # Species-specific Fishing
+        # ---------------------
+
+        for species_name, species_profile in SPECIES_FISHING_PROFILES.items():
+            species_score, species_explanation = score_species_fishing(
+                row=row,
+                species_name=species_name,
+                species_profile=species_profile,
+            )
+
+            rows.append({
+                "date": row["date"],
+                "activity": species_name,
+                "predicted_score": species_score,
+                "label": score_label(species_score),
+                "explanation": species_explanation,
+                "gear_notes": gear_notes,
+                **common_weather,
+            })
+
+        # ---------------------
+        # Camping
+        # ---------------------
 
         rows.append({
             "date": row["date"],
@@ -1169,6 +1346,10 @@ def generate_predictions(latitude, longitude, days, manual_water_temp):
             **common_weather,
         })
 
+        # ---------------------
+        # Running
+        # ---------------------
+
         rows.append({
             "date": row["date"],
             "activity": "Running",
@@ -1179,6 +1360,10 @@ def generate_predictions(latitude, longitude, days, manual_water_temp):
             **common_weather,
         })
 
+        # ---------------------
+        # Kayaking
+        # ---------------------
+
         rows.append({
             "date": row["date"],
             "activity": "Kayaking",
@@ -1188,6 +1373,10 @@ def generate_predictions(latitude, longitude, days, manual_water_temp):
             "gear_notes": gear_notes,
             **common_weather,
         })
+
+        # ---------------------
+        # Disc Golf
+        # ---------------------
 
         rows.append({
             "date": row["date"],
@@ -1200,7 +1389,21 @@ def generate_predictions(latitude, longitude, days, manual_water_temp):
         })
 
     predictions = pd.DataFrame(rows)
-    predictions["date"] = pd.to_datetime(predictions["date"]).dt.strftime("%Y-%m-%d")
+
+    predictions["date"] = pd.to_datetime(
+        predictions["date"],
+        errors="coerce",
+    ).dt.strftime("%Y-%m-%d")
+
+    # Safety cleanup: one row per date/activity
+    predictions = predictions.drop_duplicates(
+        subset=["date", "activity"],
+        keep="last",
+    )
+
+    predictions = predictions.sort_values(
+        ["date", "activity"]
+    ).reset_index(drop=True)
 
     return predictions
 
@@ -1881,17 +2084,27 @@ def get_recommended_window_for_activity(time_recommendations, selected_date, sel
     time_row = matching_time.iloc[0]
 
     window_column_map = {
-        "Fishing": "Best Fishing Window",
-        "Running": "Best Running Window",
-        "Kayaking": "Best Kayaking Window",
-        "Disc Golf": "Best Disc Golf Window",
+    "Fishing": "Best Fishing Window",
+    "Bass Fishing": "Best Fishing Window",
+    "Trout Fishing": "Best Fishing Window",
+    "Walleye Fishing": "Best Fishing Window",
+    "Pike Fishing": "Best Fishing Window",
+    "Panfish Fishing": "Best Fishing Window",
+    "Running": "Best Running Window",
+    "Kayaking": "Best Kayaking Window",
+    "Disc Golf": "Best Disc Golf Window",
     }
 
     score_column_map = {
-        "Fishing": "Fishing Window Score",
-        "Running": "Running Window Score",
-        "Kayaking": "Kayaking Window Score",
-        "Disc Golf": "Disc Golf Window Score",
+    "Fishing": "Fishing Window Score",
+    "Bass Fishing": "Fishing Window Score",
+    "Trout Fishing": "Fishing Window Score",
+    "Walleye Fishing": "Fishing Window Score",
+    "Pike Fishing": "Fishing Window Score",
+    "Panfish Fishing": "Fishing Window Score",
+    "Running": "Running Window Score",
+    "Kayaking": "Kayaking Window Score",
+    "Disc Golf": "Disc Golf Window Score",
     }
 
     if selected_activity not in window_column_map:
@@ -1965,7 +2178,7 @@ def apply_preference_adjustments(predictions, preferences):
         # -------------------------
         # Fishing preferences
         # -------------------------
-        if activity == "Fishing":
+        if activity in FISHING_ACTIVITIES:
             fishing_bug_boost = preferences["fishing_bug_boost"]
             fishing_wind_tolerance = preferences["fishing_wind_tolerance"]
 
@@ -2116,13 +2329,28 @@ def save_prediction_history(predictions):
     Saves current predictions to Supabase.
 
     Uses upsert so each date/activity keeps the latest prediction.
+    Also removes duplicate date/activity rows before sending to Supabase.
     """
 
     try:
         supabase = get_supabase_client()
 
         predictions_to_save = predictions.copy()
+
+        # Make sure date is a consistent string format
+        predictions_to_save["date"] = pd.to_datetime(
+            predictions_to_save["date"],
+            errors="coerce",
+        ).dt.strftime("%Y-%m-%d")
+
         predictions_to_save["generated_at"] = datetime.now().isoformat(timespec="seconds")
+
+        # Important fix:
+        # Prevent duplicate date/activity rows from going into one upsert call.
+        predictions_to_save = predictions_to_save.drop_duplicates(
+            subset=["date", "activity"],
+            keep="last",
+        )
 
         allowed_columns = [
             "generated_at",
@@ -2699,6 +2927,7 @@ try:
     )
 
     if st.session_state.get("last_prediction_save_key") != prediction_save_key:
+
         save_prediction_history(predictions)
         st.session_state["last_prediction_save_key"] = prediction_save_key
     # Reuse cached weather data for hourly time recommendations
@@ -3079,13 +3308,13 @@ with log_tab:
             options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
         )
 
-    if selected_activity in ["Fishing", "Kayaking"]:
+    if selected_activity in FISHING_ACTIVITIES + ["Kayaking"]:
         actual_water_conditions = st.selectbox(
             "Actual water conditions",
             options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
         )
 
-    if selected_activity == "Fishing":
+    if selected_activity in FISHING_ACTIVITIES:
         fish_activity = st.selectbox(
             "Fish activity",
             options=["None", "Low", "Medium", "High", "Not sure"],
