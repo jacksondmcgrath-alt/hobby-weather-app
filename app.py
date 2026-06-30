@@ -2832,169 +2832,181 @@ for key, default_value in DEFAULT_SETTINGS.items():
     if key not in st.session_state:
         st.session_state[key] = saved_settings.get(key, default_value)
 
-st.sidebar.header("Forecast Settings")
 
-st.sidebar.write("Search for a location or manually enter coordinates.")
-
-location_query = st.sidebar.text_input(
-    "Location search",
-    key="location_query",
-    help="Example: Ann Arbor, MI or Grand Rapids, Michigan",
-)
-
-if st.sidebar.button("Find location"):
-    try:
-        location_results = geocode_place(location_query)
-
-        if len(location_results) == 0:
-            st.sidebar.warning("No locations found. Try a simpler search.")
-            st.session_state["location_results"] = []
-        else:
-            st.session_state["location_results"] = location_results
-            st.sidebar.success("Location results found. Choose one below.")
-
-    except Exception as e:
-        st.sidebar.error("Could not search for that location.")
-        st.sidebar.write(e)
+st.sidebar.header("Settings")
 
 
-if "location_results" not in st.session_state:
-    st.session_state["location_results"] = []
+# -------------------------
+# Location settings
+# -------------------------
 
+with st.sidebar.expander("📍 Location", expanded=True):
+    st.write("Search for a location or manually enter coordinates.")
 
-if len(st.session_state["location_results"]) > 0:
-    location_labels = [
-        result["label"] for result in st.session_state["location_results"]
-    ]
-
-    selected_location_label = st.sidebar.selectbox(
-        "Choose matching location",
-        options=location_labels,
+    location_query = st.text_input(
+        "Location search",
+        key="location_query",
+        help="Example: Ann Arbor, MI or Grand Rapids, Michigan",
     )
 
-    if st.sidebar.button("Use selected location"):
-        selected_result = next(
-            result for result in st.session_state["location_results"]
-            if result["label"] == selected_location_label
+    if st.button("Find location"):
+        try:
+            location_results = geocode_place(location_query)
+
+            if len(location_results) == 0:
+                st.warning("No locations found. Try a simpler search.")
+                st.session_state["location_results"] = []
+            else:
+                st.session_state["location_results"] = location_results
+                st.success("Location results found. Choose one below.")
+
+        except Exception as e:
+            st.error("Could not search for that location.")
+            st.write(e)
+
+    if "location_results" not in st.session_state:
+        st.session_state["location_results"] = []
+
+    if len(st.session_state["location_results"]) > 0:
+        location_labels = [
+            result["label"] for result in st.session_state["location_results"]
+        ]
+
+        selected_location_label = st.selectbox(
+            "Choose matching location",
+            options=location_labels,
         )
 
-        st.session_state["latitude"] = float(selected_result["latitude"])
-        st.session_state["longitude"] = float(selected_result["longitude"])
-        st.sidebar.success(f"Using {selected_location_label}")
-        st.rerun()
+        if st.button("Use selected location"):
+            selected_result = next(
+                result for result in st.session_state["location_results"]
+                if result["label"] == selected_location_label
+            )
 
+            st.session_state["latitude"] = float(selected_result["latitude"])
+            st.session_state["longitude"] = float(selected_result["longitude"])
+            st.success(f"Using {selected_location_label}")
+            st.rerun()
 
-latitude = st.sidebar.number_input(
-    "Latitude",
-    format="%.4f",
-    key="latitude",
-)
-
-longitude = st.sidebar.number_input(
-    "Longitude",
-    format="%.4f",
-    key="longitude",
-)
-
-forecast_days = st.sidebar.slider(
-    "Forecast days",
-    min_value=3,
-    max_value=14,
-    key="forecast_days",
-)
-
-
-use_manual_water_temp = st.sidebar.checkbox(
-    "I know the freshwater temperature",
-    key="use_manual_water_temp",
-)
-
-if use_manual_water_temp:
-    manual_water_temp = st.sidebar.number_input(
-        "Water temperature °F",
-        min_value=32,
-        max_value=90,
-        key="manual_water_temp",
+    latitude = st.number_input(
+        "Latitude",
+        format="%.4f",
+        key="latitude",
     )
-else:
-    manual_water_temp = None
+
+    longitude = st.number_input(
+        "Longitude",
+        format="%.4f",
+        key="longitude",
+    )
+
+    forecast_days = st.slider(
+        "Forecast days",
+        min_value=3,
+        max_value=14,
+        key="forecast_days",
+    )
 
 
-st.sidebar.header("Preference Sliders")
+# -------------------------
+# Fishing and water settings
+# -------------------------
 
-st.sidebar.write("Use these to personalize the scoring model.")
+with st.sidebar.expander("🎣 Fishing / Water", expanded=False):
+    use_manual_water_temp = st.checkbox(
+        "I know the freshwater temperature",
+        key="use_manual_water_temp",
+    )
 
-bug_tolerance = st.sidebar.slider(
-    "General bug tolerance",
-    min_value=0,
-    max_value=10,
-    key="bug_tolerance",
-    help="0 = I hate bugs, 10 = bugs do not bother me much",
-)
+    if use_manual_water_temp:
+        manual_water_temp = st.number_input(
+            "Water temperature °F",
+            min_value=32,
+            max_value=90,
+            key="manual_water_temp",
+        )
+    else:
+        manual_water_temp = None
 
-rain_caution = st.sidebar.slider(
-    "Rain caution",
-    min_value=0,
-    max_value=10,
-    key="rain_caution",
-    help="0 = rain does not bother me, 10 = avoid rain strongly",
-)
 
-fishing_bug_boost = st.sidebar.slider(
-    "Fishing insect activity importance",
-    min_value=0,
-    max_value=10,
-    key="fishing_bug_boost",
-    help="Higher means bug/insect activity helps the fishing score more",
-)
+# -------------------------
+# Preference sliders
+# -------------------------
 
-fishing_wind_tolerance = st.sidebar.slider(
-    "Fishing wind tolerance",
-    min_value=0,
-    max_value=10,
-    key="fishing_wind_tolerance",
-    help="Higher means you are more okay with wind while fishing",
-)
+with st.sidebar.expander("🎛️ Preferences", expanded=False):
+    st.write("Use these to personalize the scoring model.")
 
-camping_bug_sensitivity = st.sidebar.slider(
-    "Camping bug sensitivity",
-    min_value=0,
-    max_value=10,
-    key="camping_bug_sensitivity",
-    help="Higher means bugs hurt camping scores more",
-)
+    bug_tolerance = st.slider(
+        "General bug tolerance",
+        min_value=0,
+        max_value=10,
+        key="bug_tolerance",
+        help="0 = I hate bugs, 10 = bugs do not bother me much",
+    )
 
-running_wind_sensitivity = st.sidebar.slider(
-    "Running wind sensitivity",
-    min_value=0,
-    max_value=10,
-    key="running_wind_sensitivity",
-    help="Higher means wind hurts running scores more",
-)
+    rain_caution = st.slider(
+        "Rain caution",
+        min_value=0,
+        max_value=10,
+        key="rain_caution",
+        help="0 = rain does not bother me, 10 = avoid rain strongly",
+    )
 
-running_heat_sensitivity = st.sidebar.slider(
-    "Running heat sensitivity",
-    min_value=0,
-    max_value=10,
-    key="running_heat_sensitivity",
-    help="Higher means warm weather hurts running scores more",
-)
+    fishing_bug_boost = st.slider(
+        "Fishing insect activity importance",
+        min_value=0,
+        max_value=10,
+        key="fishing_bug_boost",
+        help="Higher means bug/insect activity helps the fishing score more",
+    )
 
-kayaking_wind_caution = st.sidebar.slider(
-    "Kayaking wind caution",
-    min_value=0,
-    max_value=10,
-    key="kayaking_wind_caution",
-    help="Higher means wind/gusts hurt kayaking scores more",
-)
+    fishing_wind_tolerance = st.slider(
+        "Fishing wind tolerance",
+        min_value=0,
+        max_value=10,
+        key="fishing_wind_tolerance",
+        help="Higher means you are more okay with wind while fishing",
+    )
 
-disc_golf_wind_sensitivity = st.sidebar.slider(
-    "Disc golf wind sensitivity",
-    min_value=0,
-    max_value=10,
-    key="disc_golf_wind_sensitivity",
-    help="Higher means wind hurts disc golf scores more",
-)
+    camping_bug_sensitivity = st.slider(
+        "Camping bug sensitivity",
+        min_value=0,
+        max_value=10,
+        key="camping_bug_sensitivity",
+        help="Higher means bugs hurt camping scores more",
+    )
+
+    running_wind_sensitivity = st.slider(
+        "Running wind sensitivity",
+        min_value=0,
+        max_value=10,
+        key="running_wind_sensitivity",
+        help="Higher means wind hurts running scores more",
+    )
+
+    running_heat_sensitivity = st.slider(
+        "Running heat sensitivity",
+        min_value=0,
+        max_value=10,
+        key="running_heat_sensitivity",
+        help="Higher means warm weather hurts running scores more",
+    )
+
+    kayaking_wind_caution = st.slider(
+        "Kayaking wind caution",
+        min_value=0,
+        max_value=10,
+        key="kayaking_wind_caution",
+        help="Higher means wind/gusts hurt kayaking scores more",
+    )
+
+    disc_golf_wind_sensitivity = st.slider(
+        "Disc golf wind sensitivity",
+        min_value=0,
+        max_value=10,
+        key="disc_golf_wind_sensitivity",
+        help="Higher means wind hurts disc golf scores more",
+    )
 
 
 preferences = {
@@ -3010,56 +3022,60 @@ preferences = {
 }
 
 
-st.sidebar.header("Display Settings")
+# -------------------------
+# Display settings
+# -------------------------
 
-phone_friendly_view = st.sidebar.checkbox(
-    "Phone-friendly view",
-    key="phone_friendly_view",
-)
-
-
-st.sidebar.header("Save Settings")
-
-if st.sidebar.button("Save current settings"):
-    settings_to_save = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "location_query": location_query,
-        "forecast_days": forecast_days,
-        "use_manual_water_temp": use_manual_water_temp,
-        "manual_water_temp": st.session_state.get("manual_water_temp", 65),
-        "phone_friendly_view": phone_friendly_view,
-
-        "bug_tolerance": bug_tolerance,
-        "rain_caution": rain_caution,
-        "fishing_bug_boost": fishing_bug_boost,
-        "fishing_wind_tolerance": fishing_wind_tolerance,
-        "camping_bug_sensitivity": camping_bug_sensitivity,
-        "running_wind_sensitivity": running_wind_sensitivity,
-        "running_heat_sensitivity": running_heat_sensitivity,
-        "kayaking_wind_caution": kayaking_wind_caution,
-        "disc_golf_wind_sensitivity": disc_golf_wind_sensitivity,
-    }
-
-    save_settings(settings_to_save)
-
-    st.sidebar.success("Settings saved.")
+with st.sidebar.expander("🖥️ Display", expanded=False):
+    phone_friendly_view = st.checkbox(
+        "Phone-friendly view",
+        key="phone_friendly_view",
+    )
 
 
-if st.sidebar.button("Reset settings to defaults"):
-    save_settings(DEFAULT_SETTINGS)
+# -------------------------
+# Save and refresh settings
+# -------------------------
 
-    for key in DEFAULT_SETTINGS:
-        if key in st.session_state:
-            del st.session_state[key]
+with st.sidebar.expander("💾 Save / Refresh", expanded=False):
+    if st.button("Save current settings"):
+        settings_to_save = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "location_query": location_query,
+            "forecast_days": forecast_days,
+            "use_manual_water_temp": use_manual_water_temp,
+            "manual_water_temp": st.session_state.get("manual_water_temp", 65),
+            "phone_friendly_view": phone_friendly_view,
 
-    st.cache_data.clear()
-    st.rerun()
+            "bug_tolerance": bug_tolerance,
+            "rain_caution": rain_caution,
+            "fishing_bug_boost": fishing_bug_boost,
+            "fishing_wind_tolerance": fishing_wind_tolerance,
+            "camping_bug_sensitivity": camping_bug_sensitivity,
+            "running_wind_sensitivity": running_wind_sensitivity,
+            "running_heat_sensitivity": running_heat_sensitivity,
+            "kayaking_wind_caution": kayaking_wind_caution,
+            "disc_golf_wind_sensitivity": disc_golf_wind_sensitivity,
+        }
 
+        save_settings(settings_to_save)
 
-if st.sidebar.button("Clear cached weather and refresh"):
-    st.cache_data.clear()
-    st.rerun()
+        st.success("Settings saved.")
+
+    if st.button("Reset settings to defaults"):
+        save_settings(DEFAULT_SETTINGS)
+
+        for key in DEFAULT_SETTINGS:
+            if key in st.session_state:
+                del st.session_state[key]
+
+        st.cache_data.clear()
+        st.rerun()
+
+    if st.button("Clear cached weather and refresh"):
+        st.cache_data.clear()
+        st.rerun()
 
 # -------------------------
 # Generate predictions and best times
