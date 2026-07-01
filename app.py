@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from datetime import datetime
 from urllib import response
 
@@ -39,6 +40,7 @@ DEFAULT_SETTINGS = {
     "use_manual_water_temp": False,
     "manual_water_temp": 65,
     "phone_friendly_view": True,
+    "include_air_quality": False,
 
     # Preference sliders
     "bug_tolerance": 5,
@@ -148,6 +150,63 @@ def geocode_place(place):
 # General helper functions
 # =========================
 
+def get_json_with_retries(url, params, timeout=10, retries=2, backoff_seconds=1):
+    """
+    Gets JSON from an API with simple retries.
+
+    This helps avoid crashes from temporary connection resets.
+    """
+
+    last_error = None
+
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=timeout,
+            )
+
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.RequestException as e:
+            last_error = e
+
+            if attempt < retries:
+                time.sleep(backoff_seconds * (attempt + 1))
+            else:
+                raise last_error
+            
+def get_json_with_retries(url, params, timeout=12, retries=2, backoff_seconds=1):
+    """
+    Gets JSON from an API with simple retries.
+
+    Helps avoid crashes from temporary timeouts, 504 errors,
+    connection resets, or other temporary API problems.
+    """
+
+    last_error = None
+
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=timeout,
+            )
+
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.RequestException as e:
+            last_error = e
+
+            if attempt < retries:
+                time.sleep(backoff_seconds * (attempt + 1))
+            else:
+                raise last_error            
+
 @st.cache_resource
 def get_supabase_client():
     """
@@ -158,6 +217,108 @@ def get_supabase_client():
     supabase_key = st.secrets["SUPABASE_KEY"]
 
     return create_client(supabase_url, supabase_key)
+
+def make_forecast_cache_key(latitude, longitude, forecast_days, manual_water_temp, preferences, include_air_quality):
+    """
+    Creates a cache key for forecast results.
+
+    Rounded coordinates prevent tiny decimal changes from creating new cache keys.
+    """
+
+    lat_key = round(float(latitude), 3)
+    lon_key = round(float(longitude), 3)
+
+    manual_water_temp_key = (
+        "none" if manual_water_temp is None else round(float(manual_water_temp), 1)
+    )
+
+    preferences_key = tuple(sorted(preferences.items()))
+
+    return f"{lat_key}_{lon_key}_{forecast_days}_{manual_water_temp_key}_{include_air_quality}_{preferences_key}"
+
+
+def load_forecast_cache(cache_key, max_age_minutes=120, allow_stale=False):
+    """
+    Loads cached forecast results from Supabase.
+
+    If allow_stale=False, only returns cache if recent enough.
+    If allow_stale=True, returns old cache too as an emergency fallback.
+    """
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("forecast_cache")
+            .select("*")
+            .eq("cache_key", cache_key)
+            .limit(1)
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return None, None
+
+        row = rows[0]
+
+        generated_at = pd.to_datetime(row.get("generated_at"), utc=True)
+        now = pd.Timestamp.now(tz="UTC")
+
+        age_minutes = (now - generated_at).total_seconds() / 60
+
+        if age_minutes > max_age_minutes and not allow_stale:
+            return None, None
+
+        predictions = pd.DataFrame(row.get("predictions", []))
+        time_recommendations = pd.DataFrame(row.get("time_recommendations", []))
+
+        if len(predictions) == 0 or len(time_recommendations) == 0:
+            return None, None
+
+        return predictions, time_recommendations
+
+    except Exception:
+        return None, None
+
+
+def save_forecast_cache(
+    cache_key,
+    latitude,
+    longitude,
+    forecast_days,
+    manual_water_temp,
+    predictions,
+    time_recommendations,
+):
+    """
+    Saves forecast results to Supabase for faster future app opens.
+    """
+
+    try:
+        supabase = get_supabase_client()
+
+        row = {
+            "cache_key": cache_key,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "forecast_days": int(forecast_days),
+            "manual_water_temp": None if manual_water_temp is None else float(manual_water_temp),
+            "predictions": predictions.to_dict(orient="records"),
+            "time_recommendations": time_recommendations.to_dict(orient="records"),
+        }
+
+        supabase.table("forecast_cache").upsert(
+            row,
+            on_conflict="cache_key",
+        ).execute()
+
+    except Exception as e:
+        st.warning("Could not save forecast cache.")
+        st.write(e)
 
 def clamp_score(score):
     return max(0, min(100, score))
@@ -383,7 +544,7 @@ def dashboard_warning_text(row):
 # Weather fetching
 # =========================
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=7200)
 def fetch_weather_forecast(latitude, longitude, days):
     """
     Gets hourly weather forecast data from Open-Meteo.
@@ -414,10 +575,12 @@ def fetch_weather_forecast(latitude, longitude, days):
         "timezone": "auto",
     }
 
-    response = requests.get(FORECAST_URL, params=params, timeout=20)
-    response.raise_for_status()
-
-    data = response.json()
+    data = get_json_with_retries(
+        FORECAST_URL,
+        params=params,
+        timeout=12,
+        retries=2,
+    )
 
     df = pd.DataFrame(data["hourly"])
     df["time"] = pd.to_datetime(df["time"])
@@ -425,10 +588,12 @@ def fetch_weather_forecast(latitude, longitude, days):
     return df
 
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=7200)
 def fetch_air_quality_forecast(latitude, longitude, days):
     """
     Gets air quality and UV data from Open-Meteo Air Quality API.
+
+    If the API fails, returns an empty dataframe so the app can use defaults.
     """
 
     params = {
@@ -439,17 +604,29 @@ def fetch_air_quality_forecast(latitude, longitude, days):
         "timezone": "auto",
     }
 
-    response = requests.get(AIR_QUALITY_URL, params=params, timeout=20)
-    response.raise_for_status()
+    try:
+        data = get_json_with_retries(
+            AIR_QUALITY_URL,
+            params=params,
+            timeout=6,
+            retries=1,
+        )
 
-    data = response.json()
+        df = pd.DataFrame(data["hourly"])
+        df["time"] = pd.to_datetime(df["time"])
 
-    df = pd.DataFrame(data["hourly"])
-    df["time"] = pd.to_datetime(df["time"])
+        return df
 
-    return df
+    except Exception:
+        return pd.DataFrame(
+            columns=[
+                "time",
+                "us_aqi",
+                "uv_index",
+            ]
+        )
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=7200)
 def fetch_sun_times(latitude, longitude, days):
     """
     Gets sunrise and sunset times from Open-Meteo.
@@ -463,10 +640,12 @@ def fetch_sun_times(latitude, longitude, days):
         "timezone": "auto",
     }
 
-    response = requests.get(FORECAST_URL, params=params, timeout=20)
-    response.raise_for_status()
-
-    data = response.json()
+    data = get_json_with_retries(
+        FORECAST_URL,
+        params=params,
+        timeout=10,
+        retries=2,
+    )
 
     sun_df = pd.DataFrame(data["daily"])
 
@@ -1413,7 +1592,7 @@ def score_disc_golf(row):
 
     return round(clamp_score(score)), explanation
 
-def generate_predictions(latitude, longitude, days, manual_water_temp):
+def generate_predictions(latitude, longitude, days, manual_water_temp, include_air_quality=False):
     """
     Full automatic prediction pipeline.
 
@@ -1428,9 +1607,12 @@ def generate_predictions(latitude, longitude, days, manual_water_temp):
 
     hourly_weather = fetch_weather_forecast(latitude, longitude, days)
 
-    try:
-        air_quality = fetch_air_quality_forecast(latitude, longitude, days)
-    except Exception:
+    if include_air_quality:
+        try:
+            air_quality = fetch_air_quality_forecast(latitude, longitude, days)
+        except Exception:
+            air_quality = None
+    else:
         air_quality = None
 
     daily = aggregate_weather_by_day(hourly_weather)
@@ -1585,10 +1767,12 @@ def fetch_sun_times(latitude, longitude, days):
         "timezone": "auto",
     }
 
-    response = requests.get(FORECAST_URL, params=params, timeout=20)
-    response.raise_for_status()
-
-    data = response.json()
+    data = get_json_with_retries(
+        FORECAST_URL,
+        params=params,
+        timeout=12,
+        retries=2,
+    )
 
     sun_df = pd.DataFrame(data["daily"])
 
@@ -3032,6 +3216,11 @@ with st.sidebar.expander("🖥️ Display", expanded=False):
         key="phone_friendly_view",
     )
 
+    include_air_quality = st.checkbox(
+        "Include air quality / UV",
+        key="include_air_quality",
+        help="Turn off for faster loading. Turn on if air quality matters for running.",
+    )
 
 # -------------------------
 # Save and refresh settings
@@ -3047,6 +3236,7 @@ with st.sidebar.expander("💾 Save / Refresh", expanded=False):
             "use_manual_water_temp": use_manual_water_temp,
             "manual_water_temp": st.session_state.get("manual_water_temp", 65),
             "phone_friendly_view": phone_friendly_view,
+            "include_air_quality": include_air_quality,
 
             "bug_tolerance": bug_tolerance,
             "rain_caution": rain_caution,
@@ -3073,6 +3263,11 @@ with st.sidebar.expander("💾 Save / Refresh", expanded=False):
         st.cache_data.clear()
         st.rerun()
 
+    if st.button("Force refresh forecast"):
+        st.session_state["force_refresh_forecast"] = True
+        st.cache_data.clear()
+        st.rerun()
+
     if st.button("Clear cached weather and refresh"):
         st.cache_data.clear()
         st.rerun()
@@ -3083,46 +3278,105 @@ with st.sidebar.expander("💾 Save / Refresh", expanded=False):
 
 with st.spinner("Loading forecast and scoring activities..."):
     try:
-        base_predictions = generate_predictions(
+        force_refresh = st.session_state.pop("force_refresh_forecast", False)
+
+        forecast_cache_key = make_forecast_cache_key(
             latitude=latitude,
             longitude=longitude,
-            days=forecast_days,
+            forecast_days=forecast_days,
             manual_water_temp=manual_water_temp,
-        )
-
-        predictions = apply_preference_adjustments(
-            predictions=base_predictions,
             preferences=preferences,
+            include_air_quality=include_air_quality,
         )
 
-        prediction_save_key = (
-            f"{latitude}_{longitude}_{forecast_days}_"
-            f"{manual_water_temp}_"
-            f"{predictions['date'].min()}_{predictions['date'].max()}_"
-            f"{tuple(sorted(preferences.items()))}"
-    )
+        if not force_refresh:
+            cached_predictions, cached_time_recommendations = load_forecast_cache(
+                forecast_cache_key,
+                max_age_minutes=120,
+                allow_stale=False,
+            )
+        else:
+            cached_predictions, cached_time_recommendations = None, None
 
-        if st.session_state.get("last_prediction_save_key") != prediction_save_key:
-            save_prediction_history(predictions)
-            load_prediction_history.clear()
-            st.session_state["last_prediction_save_key"] = prediction_save_key
-        # Reuse cached weather data for hourly time recommendations
-        hourly_weather_for_times = fetch_weather_forecast(
-            latitude=latitude,
-            longitude=longitude,
-            days=forecast_days,
-        )
+        if cached_predictions is not None and cached_time_recommendations is not None:
+            predictions = cached_predictions
+            time_recommendations = cached_time_recommendations
 
-        sun_times = fetch_sun_times(
-            latitude=latitude,
-            longitude=longitude,
-            days=forecast_days,
-        )
+            st.caption("Using cached forecast from the last 2 hours.")
 
-        time_recommendations = build_time_recommendations(
-            hourly_df=hourly_weather_for_times,
-            sun_times=sun_times,
-        )
+        else:
+            try:
+                base_predictions = generate_predictions(
+                    latitude=latitude,
+                    longitude=longitude,
+                    days=forecast_days,
+                    manual_water_temp=manual_water_temp,
+                    include_air_quality=include_air_quality,
+                )
+
+                predictions = apply_preference_adjustments(
+                    predictions=base_predictions,
+                    preferences=preferences,
+                )
+
+                hourly_weather_for_times = fetch_weather_forecast(
+                    latitude=latitude,
+                    longitude=longitude,
+                    days=forecast_days,
+                )
+
+                sun_times = fetch_sun_times(
+                    latitude=latitude,
+                    longitude=longitude,
+                    days=forecast_days,
+                )
+
+                time_recommendations = build_time_recommendations(
+                    hourly_df=hourly_weather_for_times,
+                    sun_times=sun_times,
+                )
+
+                save_forecast_cache(
+                    cache_key=forecast_cache_key,
+                    latitude=latitude,
+                    longitude=longitude,
+                    forecast_days=forecast_days,
+                    manual_water_temp=manual_water_temp,
+                    predictions=predictions,
+                    time_recommendations=time_recommendations,
+                )
+
+                prediction_save_key = (
+                    f"{latitude}_{longitude}_{forecast_days}_"
+                    f"{manual_water_temp}_"
+                    f"{include_air_quality}_"
+                    f"{predictions['date'].min()}_{predictions['date'].max()}_"
+                    f"{tuple(sorted(preferences.items()))}"
+                )
+
+                if st.session_state.get("last_prediction_save_key") != prediction_save_key:
+                    save_prediction_history(predictions)
+                    load_prediction_history.clear()
+                    st.session_state["last_prediction_save_key"] = prediction_save_key
+
+            except Exception as fresh_fetch_error:
+                stale_predictions, stale_time_recommendations = load_forecast_cache(
+                    forecast_cache_key,
+                    max_age_minutes=999999,
+                    allow_stale=True,
+                )
+
+                if stale_predictions is not None and stale_time_recommendations is not None:
+                    predictions = stale_predictions
+                    time_recommendations = stale_time_recommendations
+
+                    st.warning(
+                        "Fresh weather data could not be loaded, so the app is using an older cached forecast."
+                    )
+                    st.caption(f"Weather API error: {fresh_fetch_error}")
+
+                else:
+                    raise fresh_fetch_error
 
     except Exception as e:
         st.error("Could not generate predictions.")
