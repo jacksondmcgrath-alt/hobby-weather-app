@@ -3081,52 +3081,53 @@ with st.sidebar.expander("💾 Save / Refresh", expanded=False):
 # Generate predictions and best times
 # -------------------------
 
-try:
-    base_predictions = generate_predictions(
-        latitude=latitude,
-        longitude=longitude,
-        days=forecast_days,
-        manual_water_temp=manual_water_temp,
+with st.spinner("Loading forecast and scoring activities..."):
+    try:
+        base_predictions = generate_predictions(
+            latitude=latitude,
+            longitude=longitude,
+            days=forecast_days,
+            manual_water_temp=manual_water_temp,
+        )
+
+        predictions = apply_preference_adjustments(
+            predictions=base_predictions,
+            preferences=preferences,
+        )
+
+        prediction_save_key = (
+            f"{latitude}_{longitude}_{forecast_days}_"
+            f"{manual_water_temp}_"
+            f"{predictions['date'].min()}_{predictions['date'].max()}_"
+            f"{tuple(sorted(preferences.items()))}"
     )
 
-    predictions = apply_preference_adjustments(
-        predictions=base_predictions,
-        preferences=preferences,
-    )
+        if st.session_state.get("last_prediction_save_key") != prediction_save_key:
+            save_prediction_history(predictions)
+            load_prediction_history.clear()
+            st.session_state["last_prediction_save_key"] = prediction_save_key
+        # Reuse cached weather data for hourly time recommendations
+        hourly_weather_for_times = fetch_weather_forecast(
+            latitude=latitude,
+            longitude=longitude,
+            days=forecast_days,
+        )
 
-    prediction_save_key = (
-    f"{latitude}_{longitude}_{forecast_days}_"
-    f"{manual_water_temp}_"
-    f"{predictions['date'].min()}_{predictions['date'].max()}_"
-    f"{tuple(sorted(preferences.items()))}"
-    )
+        sun_times = fetch_sun_times(
+            latitude=latitude,
+            longitude=longitude,
+            days=forecast_days,
+        )
 
-    if st.session_state.get("last_prediction_save_key") != prediction_save_key:
+        time_recommendations = build_time_recommendations(
+            hourly_df=hourly_weather_for_times,
+            sun_times=sun_times,
+        )
 
-        save_prediction_history(predictions)
-        st.session_state["last_prediction_save_key"] = prediction_save_key
-    # Reuse cached weather data for hourly time recommendations
-    hourly_weather_for_times = fetch_weather_forecast(
-        latitude=latitude,
-        longitude=longitude,
-        days=forecast_days,
-    )
-
-    sun_times = fetch_sun_times(
-        latitude=latitude,
-        longitude=longitude,
-        days=forecast_days,
-    )
-
-    time_recommendations = build_time_recommendations(
-        hourly_df=hourly_weather_for_times,
-        sun_times=sun_times,
-    )
-
-except Exception as e:
-    st.error("Could not generate predictions.")
-    st.write(e)
-    st.stop()
+    except Exception as e:
+        st.error("Could not generate predictions.")
+        st.write(e)
+        st.stop()
 
 forecast_tab, times_tab, log_tab, history_tab, manage_tab = st.tabs(
     [
@@ -4131,6 +4132,7 @@ with manage_tab:
             if st.button("Delete selected log entry", key=f"delete_log_button_{selected_log_id}"):
                 if confirm_delete:
                     delete_log_entry(selected_log_id)
+                    load_activity_log.clear()
 
                     st.success("Log entry deleted.")
                     st.rerun()
