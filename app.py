@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import math
 from datetime import datetime
 from urllib import response
 
@@ -150,6 +151,285 @@ def geocode_place(place):
 # General helper functions
 # =========================
 
+def is_missing_scalar(value):
+    """
+    Safely checks whether a scalar value is missing.
+
+    Avoids calling pd.isna() on lists/dicts, which causes ambiguity errors.
+    """
+
+    if value is None:
+        return True
+
+    if isinstance(value, (list, dict, tuple, set)):
+        return False
+
+    try:
+        result = pd.isna(value)
+
+        try:
+            return bool(result)
+        except Exception:
+            return False
+
+    except Exception:
+        return False
+
+
+def clean_json_value(value):
+    """
+    Converts values into JSON-safe values.
+
+    Supabase JSONB cannot store:
+    - NaN
+    - Infinity
+    - pandas NA/NaT
+    - numpy scalar values
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        return {
+            str(key): clean_json_value(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            clean_json_value(item)
+            for item in value
+        ]
+
+    if isinstance(value, tuple):
+        return [
+            clean_json_value(item)
+            for item in value
+        ]
+
+    if isinstance(value, set):
+        return [
+            clean_json_value(item)
+            for item in value
+        ]
+
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    # Convert numpy/pandas scalar types to Python scalar types
+    if hasattr(value, "item"):
+        try:
+            return clean_json_value(value.item())
+        except Exception:
+            pass
+
+    if is_missing_scalar(value):
+        return None
+
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+
+    # Final fallback for unusual non-JSON types
+    if isinstance(value, (str, int, bool)):
+        return value
+
+    if isinstance(value, float):
+        return value
+
+    return str(value)
+
+
+def dataframe_to_json_records(df):
+    """
+    Converts a DataFrame to JSON-safe records.
+    """
+
+    records = df.to_dict(orient="records")
+    return clean_json_value(records)
+
+def build_tuning_suggestions(activity_log):
+    """
+    Suggests model tuning changes based on actual logged conditions.
+    """
+
+    suggestions = []
+
+    log = activity_log.copy()
+
+    numeric_columns = [
+        "prediction_error",
+        "actual_bugs_1_to_10",
+        "actual_wind_annoyance_1_to_10",
+        "actual_humidity_comfort_1_to_10",
+    ]
+
+    for column in numeric_columns:
+        if column in log.columns:
+            log[column] = pd.to_numeric(log[column], errors="coerce")
+
+    log = log.dropna(subset=["activity", "prediction_error"])
+
+    if len(log) < 3:
+        suggestions.append("Add more logs before tuning. Aim for at least 3–5 logs per activity.")
+        return suggestions
+
+    # Bugs hurting camping
+    camping = log[log["activity"] == "Camping"]
+
+    if len(camping) >= 3:
+        buggy_bad = camping[
+            (camping["actual_bugs_1_to_10"] >= 7) &
+            (camping["prediction_error"] < -10)
+        ]
+
+        if len(buggy_bad) >= 2:
+            suggestions.append(
+                "Camping seems worse than predicted on buggy days. "
+                "Consider increasing Camping bug sensitivity."
+            )
+
+    # Wind hurting kayaking
+    kayaking = log[log["activity"] == "Kayaking"]
+
+    if len(kayaking) >= 3:
+        windy_bad = kayaking[
+            (kayaking["actual_wind_annoyance_1_to_10"] >= 7) &
+            (kayaking["prediction_error"] < -10)
+        ]
+
+        if len(windy_bad) >= 2:
+            suggestions.append(
+                "Kayaking seems worse than predicted when wind is annoying. "
+                "Consider increasing Kayaking wind caution."
+            )
+
+    # Heat/humidity hurting running
+    running = log[log["activity"] == "Running"]
+
+    if len(running) >= 3:
+        humid_bad = running[
+            (running["actual_humidity_comfort_1_to_10"] <= 4) &
+            (running["prediction_error"] < -10)
+        ]
+
+        if len(humid_bad) >= 2:
+            suggestions.append(
+                "Running seems worse than predicted when humidity comfort is low. "
+                "Consider increasing Running heat sensitivity or adding more dew point penalty."
+            )
+
+    # Fishing underpredicted when fish activity high
+    fishing_activities = [
+        "Fishing",
+        "Bass Fishing",
+        "Trout Fishing",
+        "Walleye Fishing",
+        "Pike Fishing",
+        "Panfish Fishing",
+    ]
+
+    fishing = log[log["activity"].isin(fishing_activities)]
+
+    if len(fishing) >= 3 and "fish_activity" in fishing.columns:
+        high_activity = fishing[
+            (fishing["fish_activity"] == "High") &
+            (fishing["prediction_error"] > 10)
+        ]
+
+        if len(high_activity) >= 2:
+            suggestions.append(
+                "Fishing is sometimes better than predicted when fish activity is high. "
+                "Consider increasing fishing insect/activity importance or checking pressure/water temp logic."
+            )
+
+    if len(suggestions) == 0:
+        suggestions.append("No strong tuning suggestions yet. Keep logging more activities.")
+
+    return suggestions
+
+def build_accuracy_report(activity_log):
+    """
+    Builds text insights about model accuracy.
+    """
+
+    report_log = activity_log.copy()
+
+    numeric_columns = [
+        "predicted_score",
+        "actual_score_0_to_100",
+        "prediction_error",
+        "absolute_error",
+    ]
+
+    for column in numeric_columns:
+        report_log[column] = pd.to_numeric(
+            report_log[column],
+            errors="coerce",
+        )
+
+    report_log = report_log.dropna(
+        subset=[
+            "activity",
+            "predicted_score",
+            "actual_score_0_to_100",
+            "prediction_error",
+            "absolute_error",
+        ]
+    )
+
+    if len(report_log) == 0:
+        return pd.DataFrame(), []
+
+    summary = (
+        report_log
+        .groupby("activity", as_index=False)
+        .agg(
+            logs=("activity", "count"),
+            average_error=("prediction_error", "mean"),
+            average_absolute_error=("absolute_error", "mean"),
+        )
+    )
+
+    summary["average_error"] = summary["average_error"].round(1)
+    summary["average_absolute_error"] = summary["average_absolute_error"].round(1)
+
+    insights = []
+
+    most_accurate = summary.sort_values("average_absolute_error").iloc[0]
+    insights.append(
+        f"Most accurate activity so far: {most_accurate['activity']} "
+        f"with average absolute error {most_accurate['average_absolute_error']}."
+    )
+
+    least_accurate = summary.sort_values("average_absolute_error", ascending=False).iloc[0]
+    insights.append(
+        f"Least accurate activity so far: {least_accurate['activity']} "
+        f"with average absolute error {least_accurate['average_absolute_error']}."
+    )
+
+    overpredicted = summary.sort_values("average_error").iloc[0]
+
+    if overpredicted["average_error"] < -5:
+        insights.append(
+            f"The model may be overrating {overpredicted['activity']} "
+            f"by about {abs(overpredicted['average_error'])} points."
+        )
+
+    underpredicted = summary.sort_values("average_error", ascending=False).iloc[0]
+
+    if underpredicted["average_error"] > 5:
+        insights.append(
+            f"The model may be underrating {underpredicted['activity']} "
+            f"by about {underpredicted['average_error']} points."
+        )
+
+    return summary, insights
+
 def get_json_with_retries(url, params, timeout=10, retries=2, backoff_seconds=1):
     """
     Gets JSON from an API with simple retries.
@@ -178,6 +458,21 @@ def get_json_with_retries(url, params, timeout=10, retries=2, backoff_seconds=1)
             else:
                 raise last_error
             
+def get_weekend_predictions(predictions):
+    """
+    Returns predictions for Saturday and Sunday.
+    """
+
+    weekend = predictions.copy()
+    weekend["date_dt"] = pd.to_datetime(weekend["date"])
+    weekend["weekday"] = weekend["date_dt"].dt.day_name()
+
+    weekend = weekend[
+        weekend["weekday"].isin(["Saturday", "Sunday"])
+    ].copy()
+
+    return weekend
+
 def get_json_with_retries(url, params, timeout=12, retries=2, backoff_seconds=1):
     """
     Gets JSON from an API with simple retries.
@@ -234,7 +529,14 @@ def make_forecast_cache_key(latitude, longitude, forecast_days, manual_water_tem
 
     preferences_key = tuple(sorted(preferences.items()))
 
-    return f"{lat_key}_{lon_key}_{forecast_days}_{manual_water_temp_key}_{include_air_quality}_{preferences_key}"
+    cache_version = "species_nested_v1"
+
+    return (
+        f"{cache_version}_"
+        f"{lat_key}_{lon_key}_{forecast_days}_"
+        f"{manual_water_temp_key}_{include_air_quality}_"
+        f"{preferences_key}"
+    )
 
 
 def load_forecast_cache(cache_key, max_age_minutes=120, allow_stale=False):
@@ -295,6 +597,7 @@ def save_forecast_cache(
 ):
     """
     Saves forecast results to Supabase for faster future app opens.
+    Cleans NaN values before saving JSON.
     """
 
     try:
@@ -307,9 +610,11 @@ def save_forecast_cache(
             "longitude": float(longitude),
             "forecast_days": int(forecast_days),
             "manual_water_temp": None if manual_water_temp is None else float(manual_water_temp),
-            "predictions": predictions.to_dict(orient="records"),
-            "time_recommendations": time_recommendations.to_dict(orient="records"),
+            "predictions": dataframe_to_json_records(predictions),
+            "time_recommendations": dataframe_to_json_records(time_recommendations),
         }
+
+        row = clean_json_value(row)
 
         supabase.table("forecast_cache").upsert(
             row,
@@ -906,7 +1211,8 @@ SPECIES_FISHING_PROFILES = {
     },
 }
 
-FISHING_ACTIVITIES = ["Fishing"] + list(SPECIES_FISHING_PROFILES.keys())
+FISHING_ACTIVITIES = ["Fishing"]
+SPECIES_FISHING_ACTIVITY_NAMES = list(SPECIES_FISHING_PROFILES.keys())
 
 def storm_safety_score(row):
     """
@@ -1319,6 +1625,38 @@ def score_species_fishing(row, species_name, species_profile):
 
     return round(clamp_score(score)), explanation
 
+def build_species_fishing_breakdown(row):
+    """
+    Builds species-specific fishing scores for the Fishing deeper dive.
+
+    Returns a list of dictionaries sorted by best score first.
+    """
+
+    species_rows = []
+
+    for species_name, species_profile in SPECIES_FISHING_PROFILES.items():
+        species_score, species_explanation = score_species_fishing(
+            row=row,
+            species_name=species_name,
+            species_profile=species_profile,
+        )
+
+        species_rows.append({
+            "species": species_name.replace(" Fishing", ""),
+            "activity_name": species_name,
+            "score": species_score,
+            "label": score_label(species_score),
+            "explanation": species_explanation,
+        })
+
+    species_rows = sorted(
+        species_rows,
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+
+    return species_rows
+
 def score_camping(row):
     temp_score = range_score(row["temp_avg"], 70, 80, 50, 95)
     sunny_score = camping_sunny_streak_score(row["sunny_streak_days"])
@@ -1637,11 +1975,23 @@ def generate_predictions(latitude, longitude, days, manual_water_temp, include_a
             "rain_chance": round(row["precip_probability_max"]),
             "bug_index": round(row["bug_activity_index"]),
             "storm_risk": row["storm_risk"],
+            "water_temp_est": round(row["estimated_water_temp"]),
         }
 
         # ---------------------
         # General Fishing
         # ---------------------
+
+        species_breakdown = build_species_fishing_breakdown(row)
+
+        best_species = species_breakdown[0] if len(species_breakdown) > 0 else None
+
+        if best_species is not None:
+            best_species_name = best_species["species"]
+            best_species_score = best_species["score"]
+        else:
+            best_species_name = None
+            best_species_score = None
 
         rows.append({
             "date": row["date"],
@@ -1650,29 +2000,11 @@ def generate_predictions(latitude, longitude, days, manual_water_temp, include_a
             "label": score_label(fishing_score),
             "explanation": fishing_explanation,
             "gear_notes": gear_notes,
+            "best_species": best_species_name,
+            "best_species_score": best_species_score,
+            "species_breakdown": species_breakdown,
             **common_weather,
         })
-
-        # ---------------------
-        # Species-specific Fishing
-        # ---------------------
-
-        for species_name, species_profile in SPECIES_FISHING_PROFILES.items():
-            species_score, species_explanation = score_species_fishing(
-                row=row,
-                species_name=species_name,
-                species_profile=species_profile,
-            )
-
-            rows.append({
-                "date": row["date"],
-                "activity": species_name,
-                "predicted_score": species_score,
-                "label": score_label(species_score),
-                "explanation": species_explanation,
-                "gear_notes": gear_notes,
-                **common_weather,
-            })
 
         # ---------------------
         # Camping
@@ -2673,7 +3005,7 @@ def save_prediction_history(predictions):
     Saves current predictions to Supabase.
 
     Uses upsert so each date/activity keeps the latest prediction.
-    Also removes duplicate date/activity rows before sending to Supabase.
+    Cleans NaN values and handles species_breakdown JSON safely.
     """
 
     try:
@@ -2681,7 +3013,6 @@ def save_prediction_history(predictions):
 
         predictions_to_save = predictions.copy()
 
-        # Make sure date is a consistent string format
         predictions_to_save["date"] = pd.to_datetime(
             predictions_to_save["date"],
             errors="coerce",
@@ -2689,8 +3020,6 @@ def save_prediction_history(predictions):
 
         predictions_to_save["generated_at"] = datetime.now().isoformat(timespec="seconds")
 
-        # Important fix:
-        # Prevent duplicate date/activity rows from going into one upsert call.
         predictions_to_save = predictions_to_save.drop_duplicates(
             subset=["date", "activity"],
             keep="last",
@@ -2712,6 +3041,10 @@ def save_prediction_history(predictions):
             "rain_chance",
             "bug_index",
             "storm_risk",
+            "water_temp_est",
+            "best_species",
+            "best_species_score",
+            "species_breakdown",
         ]
 
         numeric_columns = [
@@ -2723,6 +3056,8 @@ def save_prediction_history(predictions):
             "gust_max",
             "rain_chance",
             "bug_index",
+            "water_temp_est",
+            "best_species_score",
         ]
 
         rows_to_save = []
@@ -2733,18 +3068,35 @@ def save_prediction_history(predictions):
             for column in allowed_columns:
                 value = row.get(column, None)
 
-                if value == "" or value is None or pd.isna(value):
+                if column == "species_breakdown":
+                    if isinstance(value, (list, dict)):
+                        clean_row[column] = clean_json_value(value)
+                    else:
+                        clean_row[column] = None
+
+                elif value == "" or value is None:
                     clean_row[column] = None
 
                 elif column in numeric_columns:
+                    cleaned_value = clean_json_value(value)
+
                     try:
-                        clean_row[column] = float(value)
+                        if cleaned_value is None:
+                            clean_row[column] = None
+                        else:
+                            clean_row[column] = float(cleaned_value)
                     except Exception:
                         clean_row[column] = None
 
                 else:
-                    clean_row[column] = str(value)
+                    cleaned_value = clean_json_value(value)
 
+                    if cleaned_value is None:
+                        clean_row[column] = None
+                    else:
+                        clean_row[column] = str(cleaned_value)
+
+            clean_row = clean_json_value(clean_row)
             rows_to_save.append(clean_row)
 
         if len(rows_to_save) > 0:
@@ -3383,9 +3735,10 @@ with st.spinner("Loading forecast and scoring activities..."):
         st.write(e)
         st.stop()
 
-forecast_tab, times_tab, log_tab, history_tab, manage_tab = st.tabs(
+forecast_tab, weekend_tab, times_tab, log_tab, history_tab, manage_tab = st.tabs(
     [
         "📊 Forecast",
+        "🗓️ Weekend",
         "⏰ Best Times",
         "➕ Log Activity",
         "📈 History",
@@ -3457,55 +3810,65 @@ with forecast_tab:
             width="stretch",
         )
 
-        # Best Fishing Target goes here
-        fishing_species = [
-            "Bass Fishing",
-            "Trout Fishing",
-            "Walleye Fishing",
-            "Pike Fishing",
-            "Panfish Fishing",
-        ]
+    fishing_predictions = filtered_predictions[
+    filtered_predictions["activity"] == "Fishing"
+    ].copy()
 
-        species_predictions = filtered_predictions[
-            filtered_predictions["activity"].isin(fishing_species)
-        ].copy()
+best_targets = []
 
-        if len(species_predictions) > 0:
-            best_species_index = species_predictions["predicted_score"].idxmax()
-            best_species = species_predictions.loc[best_species_index]
+for _, fishing_row in fishing_predictions.iterrows():
+    species_breakdown = fishing_row.get("species_breakdown", [])
 
-            st.write("### Best Fishing Target")
+    if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+        best_species = species_breakdown[0]
 
-            species_col1, species_col2, species_col3 = st.columns(3)
+        best_targets.append({
+            "date": fishing_row["date"],
+            "species": best_species["species"],
+            "score": best_species["score"],
+            "label": best_species["label"],
+            "activity": "Fishing",
+        })
 
-            with species_col1:
-                st.metric(
-                    "Target",
-                    best_species["activity"],
-                )
+if len(best_targets) > 0:
+    best_targets_df = pd.DataFrame(best_targets)
 
-            with species_col2:
-                st.metric(
-                    "Score",
-                    int(best_species["predicted_score"]),
-                    best_species["label"],
-                )
+    best_target_index = best_targets_df["score"].idxmax()
+    best_target = best_targets_df.loc[best_target_index]
 
-            with species_col3:
-                species_window, _ = get_recommended_window_for_activity(
-                    time_recommendations=time_recommendations,
-                    selected_date=best_species["date"],
-                    selected_activity=best_species["activity"],
-                )
+    st.write("### Best Fishing Target")
 
-                st.metric(
-                    "Best Window",
-                    species_window,
-                )
+    species_col1, species_col2, species_col3 = st.columns(3)
+
+    with species_col1:
+        st.metric(
+            "Target",
+            best_target["species"],
+        )
+
+    with species_col2:
+        st.metric(
+            "Species Score",
+            int(best_target["score"]),
+            best_target["label"],
+        )
+
+    with species_col3:
+        species_window, _ = get_recommended_window_for_activity(
+            time_recommendations=time_recommendations,
+            selected_date=best_target["date"],
+            selected_activity="Fishing",
+        )
+
+        st.metric(
+            "Best Window",
+            species_window,
+        )
 
     if phone_friendly_view:
         for forecast_date in sorted(filtered_predictions["date"].unique()):
             st.subheader(forecast_date)
+
             top_three = get_top_activities_for_date(
                 filtered_predictions,
                 forecast_date,
@@ -3540,8 +3903,7 @@ with forecast_tab:
                     selected_date=row["date"],
                     selected_activity=row["activity"],
                 )
-            if not show_all_activity_details and len(day_predictions) > 3:
-                st.caption("Showing top 3 activities. Check 'Show all activity details' to view everything.")
+
                 title = (
                     f"{activity_label(row['activity'])}: {row['predicted_score']} "
                     f"({row['label']})"
@@ -3566,7 +3928,8 @@ with forecast_tab:
                         f"wind {row.get('wind_max', 'N/A')} mph, "
                         f"gusts {row.get('gust_max', 'N/A')} mph, "
                         f"rain {row.get('rain_chance', 'N/A')}%, "
-                        f"bugs {row.get('bug_index', 'N/A')}"
+                        f"bugs {row.get('bug_index', 'N/A')}, "
+                        f"water temp est: {row.get('water_temp_est', 'N/A')}°F"
                     )
 
                     st.write(f"**Warnings:** {dashboard_warning_text(row)}")
@@ -3577,10 +3940,43 @@ with forecast_tab:
                     st.write("**Gear / Safety Notes:**")
                     st.write(row["gear_notes"])
 
+                    if row["activity"] == "Fishing":
+                        species_breakdown = row.get("species_breakdown", [])
+
+                        if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+                            st.markdown("#### 🎣 Species Deeper Dive")
+
+                            best_species = species_breakdown[0]
+
+                            st.success(
+                                f"Best target: {best_species['species']} "
+                                f"with score {best_species['score']} ({best_species['label']})"
+                            )
+
+                            species_table = pd.DataFrame(species_breakdown)
+
+                            st.dataframe(
+                                species_table[
+                                    [
+                                        "species",
+                                        "score",
+                                        "label",
+                                        "explanation",
+                                    ]
+                                ],
+                                width="stretch",
+                            )
+
                     st.caption(
                         f"Base score: {row.get('base_predicted_score', row['predicted_score'])} | "
                         f"Preference adjustment: {row.get('preference_adjustment', 0)}"
                     )
+
+            if not show_all_activity_details and len(day_predictions) > 3:
+                st.caption(
+                    "Showing top 3 activities. Check 'Show all activity details' to view everything."
+                )
+
     else:
         st.dataframe(
             filtered_predictions.sort_values(["date", "activity"]),
@@ -3642,6 +4038,84 @@ with forecast_tab:
         file_name="latest_predictions.csv",
         mime="text/csv",
     )
+
+with weekend_tab:
+    st.header("Weekend Planner")
+
+    weekend_predictions = get_weekend_predictions(predictions)
+
+    if len(weekend_predictions) == 0:
+        st.info("No Saturday or Sunday dates are included in the current forecast.")
+
+    else:
+        st.write("### Best Weekend Activities")
+
+        top_weekend = weekend_predictions.sort_values(
+            "predicted_score",
+            ascending=False,
+        ).head(5)
+
+        for _, row in top_weekend.iterrows():
+            recommended_window, window_score = get_recommended_window_for_activity(
+                time_recommendations=time_recommendations,
+                selected_date=row["date"],
+                selected_activity=row["activity"],
+            )
+
+            with st.container(border=True):
+                st.subheader(f"{activity_label(row['activity'])} — {row['date']}")
+                st.markdown(
+                    score_badge_html(row["predicted_score"], row["label"]),
+                    unsafe_allow_html=True,
+                )
+                st.write(f"**Best window:** {recommended_window}")
+                st.write(f"**Why:** {row['explanation']}")
+                st.write(f"**Gear/Safety:** {row['gear_notes']}")
+
+        st.write("### Best by Weekend Day")
+
+        for weekend_date in sorted(weekend_predictions["date"].unique()):
+            day_rows = weekend_predictions[
+                weekend_predictions["date"] == weekend_date
+            ].sort_values("predicted_score", ascending=False)
+
+            best = day_rows.iloc[0]
+
+            recommended_window, _ = get_recommended_window_for_activity(
+                time_recommendations=time_recommendations,
+                selected_date=best["date"],
+                selected_activity=best["activity"],
+            )
+
+            st.metric(
+                label=f"{weekend_date}",
+                value=activity_label(best["activity"]),
+                delta=f"{int(best['predicted_score'])} · {best['label']} · {recommended_window}",
+            )
+
+        fishing_species = [
+            "Bass Fishing",
+            "Trout Fishing",
+            "Walleye Fishing",
+            "Pike Fishing",
+            "Panfish Fishing",
+        ]
+
+        weekend_fishing = weekend_predictions[
+            weekend_predictions["activity"].isin(fishing_species)
+        ]
+
+        if len(weekend_fishing) > 0:
+            best_fishing = weekend_fishing.loc[
+                weekend_fishing["predicted_score"].idxmax()
+            ]
+
+            st.write("### Best Weekend Fishing Target")
+
+            st.success(
+                f"{activity_label(best_fishing['activity'])} on {best_fishing['date']} "
+                f"with score {int(best_fishing['predicted_score'])}."
+            )    
 
 with times_tab:
     st.header("Best Time Windows")
@@ -4091,6 +4565,18 @@ with history_tab:
 
         show_accuracy_charts(activity_log)
 
+        st.subheader("Model Accuracy Report")
+
+        accuracy_summary, accuracy_insights = build_accuracy_report(activity_log)
+
+        if len(accuracy_summary) == 0:
+            st.info("Not enough complete logs for an accuracy report yet.")
+        else:
+            st.dataframe(accuracy_summary, width="stretch")
+
+            for insight in accuracy_insights:
+                st.info(insight)
+
         st.write(
             """
             **How to read this:**
@@ -4102,6 +4588,13 @@ with history_tab:
         )
 
         activity_log_csv = activity_log.to_csv(index=False)
+
+        st.subheader("Personal Tuning Suggestions")
+
+        tuning_suggestions = build_tuning_suggestions(activity_log)
+
+        for suggestion in tuning_suggestions:
+            st.warning(suggestion)
 
         st.download_button(
             label="Download activity log as CSV",
