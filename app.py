@@ -1,4 +1,5 @@
 import os
+import random
 import json
 import time
 import math
@@ -147,6 +148,245 @@ def geocode_place(place):
         })
 
     return results
+
+@st.cache_data(ttl=60)
+def load_scenario_ratings():
+    """
+    Loads scenario ratings from Supabase.
+    """
+
+    columns = [
+        "id",
+        "created_at",
+        "activity",
+        "rating",
+        "rating_0_to_100",
+        "notes",
+        "scenario_json",
+        "source",
+        "temperature",
+        "wind_speed",
+        "wind_gust",
+        "rain_chance",
+        "humidity",
+        "cloud_cover",
+        "pressure_change",
+        "bug_index",
+        "water_temp",
+        "storm_safety",
+        "dew_point",
+        "aqi",
+        "uv_index",
+    ]
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("scenario_ratings")
+            .select("*")
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return pd.DataFrame(columns=columns)
+
+        df = pd.DataFrame(rows)
+
+        for column in columns:
+            if column not in df.columns:
+                df[column] = None
+
+        return df[columns]
+
+    except Exception as e:
+        st.warning("Could not load scenario ratings.")
+        st.write(e)
+        return pd.DataFrame(columns=columns)
+
+
+def save_scenario_rating(scenario, rating, notes=""):
+    """
+    Saves one scenario rating to Supabase.
+    """
+
+    supabase = get_supabase_client()
+
+    row = {
+        "activity": scenario.get("activity"),
+        "rating": float(rating),
+        "rating_0_to_100": float(rating) * 10,
+        "notes": notes,
+        "scenario_json": clean_json_value(scenario),
+        "source": "random_scenario_v1",
+
+        "temperature": scenario.get("temperature"),
+        "wind_speed": scenario.get("wind_speed"),
+        "wind_gust": scenario.get("wind_gust"),
+        "rain_chance": scenario.get("rain_chance"),
+        "humidity": scenario.get("humidity"),
+        "cloud_cover": scenario.get("cloud_cover"),
+        "pressure_change": scenario.get("pressure_change"),
+        "bug_index": scenario.get("bug_index"),
+        "water_temp": scenario.get("water_temp"),
+        "storm_safety": scenario.get("storm_safety"),
+        "dew_point": scenario.get("dew_point"),
+        "aqi": scenario.get("aqi"),
+        "uv_index": scenario.get("uv_index"),
+    }
+
+    row = clean_json_value(row)
+
+    response = (
+        supabase
+        .table("scenario_ratings")
+        .insert(row)
+        .execute()
+    )
+
+    load_scenario_ratings.clear()
+
+    return response
+
+@st.cache_data(ttl=300)
+def load_saved_locations():
+    """
+    Loads saved locations from Supabase.
+    """
+
+    columns = [
+        "id",
+        "name",
+        "latitude",
+        "longitude",
+        "location_type",
+        "water_type",
+        "default_activities",
+        "manual_water_temp",
+        "notes",
+    ]
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("saved_locations")
+            .select("*")
+            .order("name")
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return pd.DataFrame(columns=columns)
+
+        locations = pd.DataFrame(rows)
+
+        for column in columns:
+            if column not in locations.columns:
+                locations[column] = None
+
+        return locations[columns]
+
+    except Exception as e:
+        st.warning("Could not load saved locations.")
+        st.write(e)
+        return pd.DataFrame(columns=columns)
+
+
+def save_saved_location(location_data):
+    """
+    Saves a new location to Supabase.
+    """
+
+    supabase = get_supabase_client()
+
+    clean_location = {
+        "name": str(location_data.get("name", "")),
+        "latitude": float(location_data.get("latitude")),
+        "longitude": float(location_data.get("longitude")),
+        "location_type": location_data.get("location_type"),
+        "water_type": location_data.get("water_type"),
+        "default_activities": location_data.get("default_activities", []),
+        "manual_water_temp": (
+            None
+            if location_data.get("manual_water_temp") in ["", None]
+            else float(location_data.get("manual_water_temp"))
+        ),
+        "notes": location_data.get("notes", ""),
+    }
+
+    response = (
+        supabase
+        .table("saved_locations")
+        .insert(clean_location)
+        .execute()
+    )
+
+    load_saved_locations.clear()
+
+    return response
+
+
+def update_saved_location(location_id, location_data):
+    """
+    Updates a saved location.
+    """
+
+    supabase = get_supabase_client()
+
+    clean_location = {
+        "name": str(location_data.get("name", "")),
+        "latitude": float(location_data.get("latitude")),
+        "longitude": float(location_data.get("longitude")),
+        "location_type": location_data.get("location_type"),
+        "water_type": location_data.get("water_type"),
+        "default_activities": location_data.get("default_activities", []),
+        "manual_water_temp": (
+            None
+            if location_data.get("manual_water_temp") in ["", None]
+            else float(location_data.get("manual_water_temp"))
+        ),
+        "notes": location_data.get("notes", ""),
+    }
+
+    response = (
+        supabase
+        .table("saved_locations")
+        .update(clean_location)
+        .eq("id", location_id)
+        .execute()
+    )
+
+    load_saved_locations.clear()
+
+    return response
+
+
+def delete_saved_location(location_id):
+    """
+    Deletes a saved location.
+    """
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase
+        .table("saved_locations")
+        .delete()
+        .eq("id", location_id)
+        .execute()
+    )
+
+    load_saved_locations.clear()
+
+    return response
 
 @st.cache_data(ttl=3600)
 def load_baseline_hobby_rules():
@@ -421,6 +661,114 @@ HARDCODED_ACTIVITIES = {
     "Disc Golf",
 }
 
+ACTIVITY_SCENARIO_FIELDS = {
+    "Fishing": [
+        "temperature",
+        "wind_speed",
+        "rain_chance",
+        "pressure_change",
+        "bug_index",
+        "water_temp",
+        "storm_safety",
+    ],
+    "Camping": [
+        "temperature",
+        "wind_speed",
+        "wind_gust",
+        "rain_chance",
+        "humidity",
+        "bug_index",
+        "storm_safety",
+    ],
+    "Running": [
+        "temperature",
+        "wind_speed",
+        "rain_chance",
+        "dew_point",
+        "aqi",
+        "cloud_cover",
+        "storm_safety",
+    ],
+    "Kayaking": [
+        "temperature",
+        "wind_speed",
+        "wind_gust",
+        "rain_chance",
+        "water_temp",
+        "storm_safety",
+    ],
+    "Disc Golf": [
+        "temperature",
+        "wind_speed",
+        "rain_chance",
+        "bug_index",
+        "cloud_cover",
+        "storm_safety",
+    ],
+    "Tennis": [
+        "temperature",
+        "wind_speed",
+        "rain_chance",
+        "cloud_cover",
+        "storm_safety",
+    ],
+    "Beach Day": [
+        "temperature",
+        "wind_speed",
+        "rain_chance",
+        "cloud_cover",
+        "water_temp",
+        "uv_index",
+        "storm_safety",
+    ],
+}
+
+
+SCENARIO_RANGES = {
+    "temperature": [25, 95],
+    "wind_speed": [0, 25],
+    "wind_gust": [0, 40],
+    "rain_chance": [0, 100],
+    "humidity": [25, 100],
+    "cloud_cover": [0, 100],
+    "pressure_change": [-12, 12],
+    "bug_index": [0, 100],
+    "water_temp": [35, 85],
+    "storm_safety": [20, 100],
+    "dew_point": [30, 75],
+    "aqi": [0, 160],
+    "uv_index": [0, 10],
+}
+
+
+def generate_random_scenario(activity):
+    """
+    Generates a random but reasonable scenario for one activity.
+    """
+
+    fields = ACTIVITY_SCENARIO_FIELDS.get(activity, [])
+
+    scenario = {
+        "activity": activity,
+    }
+
+    for field in fields:
+        low, high = SCENARIO_RANGES[field]
+
+        if field in [
+            "temperature",
+            "wind_speed",
+            "wind_gust",
+            "water_temp",
+            "dew_point",
+            "pressure_change",
+            "uv_index",
+        ]:
+            scenario[field] = round(random.uniform(low, high), 1)
+        else:
+            scenario[field] = int(round(random.uniform(low, high)))
+
+    return scenario
 
 def get_rule_number(rule, column_name, default=None):
     """
@@ -1062,6 +1410,143 @@ def save_forecast_cache(
 def clamp_score(score):
     return max(0, min(100, score))
 
+def forecast_lead_time_score(date_value):
+    """
+    Scores forecast reliability based mostly on how far away the date is.
+
+    Higher = more confidence.
+    """
+
+    try:
+        forecast_date = pd.to_datetime(date_value).date()
+        today = pd.Timestamp.today().date()
+        days_out = (forecast_date - today).days
+    except Exception:
+        return 50
+
+    if days_out <= 0:
+        return 95
+    if days_out == 1:
+        return 90
+    if days_out == 2:
+        return 82
+    if days_out == 3:
+        return 74
+    if days_out == 4:
+        return 65
+    if days_out == 5:
+        return 58
+    if days_out == 6:
+        return 52
+    if days_out == 7:
+        return 47
+
+    return 40
+
+
+def weather_complexity_confidence(row):
+    """
+    Scores how stable/simple the forecast looks.
+
+    Higher = simpler/more reliable planning conditions.
+    Lower = more conditional/uncertain weather.
+    """
+
+    score = 100
+
+    rain_chance = row.get("rain_chance", 0)
+    wind_max = row.get("wind_max", 0)
+    gust_max = row.get("gust_max", 0)
+    storm_risk = row.get("storm_risk", "")
+
+    try:
+        rain_chance = float(rain_chance)
+    except Exception:
+        rain_chance = 0
+
+    try:
+        wind_max = float(wind_max)
+    except Exception:
+        wind_max = 0
+
+    try:
+        gust_max = float(gust_max)
+    except Exception:
+        gust_max = 0
+
+    # Mid-range precipitation forecasts are often uncertain.
+    if 30 <= rain_chance <= 70:
+        score -= 15
+    elif rain_chance > 70:
+        score -= 10
+
+    # Windy/gusty setups can change activity suitability quickly.
+    if wind_max >= 18:
+        score -= 10
+
+    if gust_max >= 25:
+        score -= 10
+
+    # Storm-risk days are harder to plan around.
+    if isinstance(storm_risk, str):
+        if storm_risk not in ["Low storm risk", "", "nan", "None"]:
+            score -= 20
+
+    return clamp_score(score)
+
+
+def forecast_confidence_label(score):
+    """
+    Converts forecast confidence score into a planning label.
+    """
+
+    if score >= 85:
+        return "High confidence"
+    if score >= 70:
+        return "Solid"
+    if score >= 55:
+        return "Watch closely"
+    if score >= 40:
+        return "Uncertain"
+    return "Very uncertain"
+
+
+def add_forecast_confidence(predictions):
+    """
+    Adds forecast confidence and confidence-adjusted planning score.
+    """
+
+    df = predictions.copy()
+
+    confidence_scores = []
+
+    for _, row in df.iterrows():
+        lead_score = forecast_lead_time_score(row["date"])
+        complexity_score = weather_complexity_confidence(row)
+
+        confidence = round(
+            clamp_score(
+                (lead_score * 0.75) +
+                (complexity_score * 0.25)
+            )
+        )
+
+        confidence_scores.append(confidence)
+
+    df["forecast_confidence"] = confidence_scores
+    df["forecast_confidence_label"] = df["forecast_confidence"].apply(
+        forecast_confidence_label
+    )
+
+    # Planning score blends activity quality with forecast confidence.
+    # This avoids overcommitting to a great-looking forecast far in the future.
+    df["planning_score"] = (
+        df["predicted_score"] * 0.80 +
+        df["forecast_confidence"] * 0.20
+    ).round(0).astype(int)
+
+    return df
+
 ACTIVITY_ICONS = {
     "Fishing": "🎣",
     "Camping": "⛺",
@@ -1236,14 +1721,18 @@ def build_best_by_day_table(predictions, time_recommendations):
 def get_top_activities_for_date(predictions, forecast_date, n=3):
     """
     Returns top N activities for a date.
+
+    Uses planning_score if available, otherwise predicted_score.
     """
 
     day_predictions = predictions[
         predictions["date"] == forecast_date
     ].copy()
 
+    sort_column = "planning_score" if "planning_score" in day_predictions.columns else "predicted_score"
+
     return day_predictions.sort_values(
-        "predicted_score",
+        sort_column,
         ascending=False,
     ).head(n)
 
@@ -3976,6 +4465,34 @@ st.sidebar.header("Settings")
 # -------------------------
 
 with st.sidebar.expander("📍 Location", expanded=True):
+
+    saved_locations = load_saved_locations()
+
+    if len(saved_locations) > 0:
+        saved_location_labels = ["Manual / Search Location"] + [
+            f"{row['name']} ({row['location_type']})"
+            for _, row in saved_locations.iterrows()
+        ]
+
+        selected_saved_location_label = st.selectbox(
+            "Saved location",
+            options=saved_location_labels,
+            key="selected_saved_location_label",
+        )
+
+        if selected_saved_location_label != "Manual / Search Location":
+            selected_index = saved_location_labels.index(selected_saved_location_label) - 1
+            selected_location = saved_locations.iloc[selected_index]
+
+            st.session_state["latitude"] = float(selected_location["latitude"])
+            st.session_state["longitude"] = float(selected_location["longitude"])
+
+            if not pd.isna(selected_location.get("manual_water_temp")):
+                st.session_state["manual_water_temp"] = float(selected_location["manual_water_temp"])
+                st.session_state["use_manual_water_temp"] = True
+
+            st.caption(f"Using saved location: {selected_location['name']}")
+
     st.write("Search for a location or manually enter coordinates.")
 
     location_query = st.text_input(
@@ -4334,14 +4851,18 @@ with st.spinner("Loading forecast and scoring activities..."):
         st.write(e)
         st.stop()
 
-forecast_tab, weekend_tab, times_tab, log_tab, history_tab, manage_tab = st.tabs(
+predictions = add_forecast_confidence(predictions)
+
+forecast_tab, weekend_tab, times_tab, log_tab, scenario_tab, history_tab, manage_tab, locations_tab = st.tabs(
     [
         "📊 Forecast",
         "🗓️ Weekend",
         "⏰ Best Times",
         "➕ Log Activity",
+        "🧪 Rate Scenarios",
         "📈 History",
         "🛠️ Manage Logs",
+        "📍 Locations",
     ]
 )
 
@@ -4350,6 +4871,165 @@ activity_log = load_activity_log()
 # -------------------------
 # Display predictions
 # -------------------------
+
+with scenario_tab:
+    st.header("Rate Scenarios")
+
+    st.write(
+        "Rate hypothetical weather situations. These ratings can later help train "
+        "a machine learning model for better first-time predictions."
+    )
+
+    available_scenario_activities = [
+        activity
+        for activity in sorted(predictions["activity"].unique())
+        if activity in ACTIVITY_SCENARIO_FIELDS
+    ]
+
+    if len(available_scenario_activities) == 0:
+        st.info("No scenario activities available.")
+
+    else:
+        selected_scenario_activity = st.selectbox(
+            "Choose activity",
+            options=available_scenario_activities,
+            key="scenario_activity_select",
+        )
+
+        if (
+            "current_scenario" not in st.session_state
+            or st.session_state.get("current_scenario_activity") != selected_scenario_activity
+        ):
+            st.session_state["current_scenario"] = generate_random_scenario(
+                selected_scenario_activity
+            )
+            st.session_state["current_scenario_activity"] = selected_scenario_activity
+
+        if st.button("Generate new scenario"):
+            st.session_state["current_scenario"] = generate_random_scenario(
+                selected_scenario_activity
+            )
+            st.session_state["current_scenario_activity"] = selected_scenario_activity
+            st.rerun()
+
+        scenario = st.session_state["current_scenario"]
+
+        st.subheader(f"Scenario: {activity_label(selected_scenario_activity)}")
+
+        scenario_display_rows = []
+
+        pretty_names = {
+            "temperature": "Temperature °F",
+            "wind_speed": "Wind speed mph",
+            "wind_gust": "Wind gust mph",
+            "rain_chance": "Rain chance %",
+            "humidity": "Humidity %",
+            "cloud_cover": "Cloud cover %",
+            "pressure_change": "Pressure change",
+            "bug_index": "Bug index",
+            "water_temp": "Water temp °F",
+            "storm_safety": "Storm safety",
+            "dew_point": "Dew point °F",
+            "aqi": "AQI",
+            "uv_index": "UV index",
+        }
+
+        for key, value in scenario.items():
+            if key == "activity":
+                continue
+
+            scenario_display_rows.append(
+                {
+                    "Factor": pretty_names.get(key, key),
+                    "Value": value,
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(scenario_display_rows),
+            width="stretch",
+        )
+
+        st.write("### Your rating")
+
+        scenario_rating = st.slider(
+            "How good does this scenario sound?",
+            min_value=1,
+            max_value=10,
+            value=5,
+            help="1 = terrible, 10 = excellent",
+            key="scenario_rating_slider",
+        )
+
+        scenario_notes = st.text_area(
+            "Notes",
+            placeholder="Example: Wind seems too high, or this looks perfect for evening fishing.",
+            key="scenario_rating_notes",
+        )
+
+        if st.button("Save scenario rating"):
+            try:
+                save_scenario_rating(
+                    scenario=scenario,
+                    rating=scenario_rating,
+                    notes=scenario_notes,
+                )
+
+                st.success("Scenario rating saved.")
+
+                st.session_state["current_scenario"] = generate_random_scenario(
+                    selected_scenario_activity
+                )
+
+                st.rerun()
+
+            except Exception as e:
+                st.error("Could not save scenario rating.")
+                st.write(type(e).__name__)
+                st.write(e)
+
+        st.markdown("---")
+
+        st.subheader("Scenario Rating Dataset")
+
+        scenario_ratings = load_scenario_ratings()
+
+        if len(scenario_ratings) == 0:
+            st.info("No scenario ratings saved yet.")
+        else:
+            st.metric(
+                "Total scenario ratings",
+                len(scenario_ratings),
+            )
+
+            rating_summary = (
+                scenario_ratings
+                .groupby("activity", as_index=False)
+                .agg(
+                    ratings=("rating", "count"),
+                    average_rating=("rating", "mean"),
+                )
+            )
+
+            rating_summary["average_rating"] = rating_summary["average_rating"].round(1)
+
+            st.dataframe(
+                rating_summary,
+                width="stretch",
+            )
+
+            with st.expander("View raw scenario ratings", expanded=False):
+                st.dataframe(
+                    scenario_ratings,
+                    width="stretch",
+                )
+
+            st.download_button(
+                label="Download scenario ratings CSV",
+                data=scenario_ratings.to_csv(index=False),
+                file_name="scenario_ratings.csv",
+                mime="text/csv",
+            )
 
 with forecast_tab:
     st.header("Predicted Scores")
@@ -4362,318 +5042,340 @@ with forecast_tab:
         default=activities,
     )
 
-    show_all_activity_details = st.checkbox(
-        "Show all activity details",
-        value=False,
-    )
-
     filtered_predictions = predictions[
         predictions["activity"].isin(selected_activities)
     ].copy()
 
-    st.subheader("Dashboard")
-
-    best_by_day = build_best_by_day_table(
-        predictions=filtered_predictions,
-        time_recommendations=time_recommendations,
-    )
-
-    if len(best_by_day) > 0:
-        today_best = best_by_day.iloc[0]
-
-        metric_col1, metric_col2, metric_col3 = st.columns(3)
-
-        with metric_col1:
-            st.metric(
-                "Next Best Activity",
-                today_best["Best Activity"],
-                today_best["Label"],
-            )
-
-        with metric_col2:
-            st.metric(
-                "Score",
-                int(today_best["Score"]),
-            )
-
-        with metric_col3:
-            st.metric(
-                "Best Window",
-                today_best["Recommended Window"],
-            )
-
-        st.write("### Best Activity by Day")
-
-        st.dataframe(
-            best_by_day,
-            width="stretch",
-        )
-
-    fishing_predictions = filtered_predictions[
-    filtered_predictions["activity"] == "Fishing"
-    ].copy()
-
-best_targets = []
-
-for _, fishing_row in fishing_predictions.iterrows():
-    species_breakdown = fishing_row.get("species_breakdown", [])
-
-    if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
-        best_species = species_breakdown[0]
-
-        best_targets.append({
-            "date": fishing_row["date"],
-            "species": best_species["species"],
-            "score": best_species["score"],
-            "label": best_species["label"],
-            "activity": "Fishing",
-        })
-
-if len(best_targets) > 0:
-    best_targets_df = pd.DataFrame(best_targets)
-
-    best_target_index = best_targets_df["score"].idxmax()
-    best_target = best_targets_df.loc[best_target_index]
-
-    st.write("### Best Fishing Target")
-
-    species_col1, species_col2, species_col3 = st.columns(3)
-
-    with species_col1:
-        st.metric(
-            "Target",
-            best_target["species"],
-        )
-
-    with species_col2:
-        st.metric(
-            "Species Score",
-            int(best_target["score"]),
-            best_target["label"],
-        )
-
-    with species_col3:
-        species_window, _ = get_recommended_window_for_activity(
-            time_recommendations=time_recommendations,
-            selected_date=best_target["date"],
-            selected_activity="Fishing",
-        )
-
-        st.metric(
-            "Best Window",
-            species_window,
-        )
-
-    if phone_friendly_view:
-        for forecast_date in sorted(filtered_predictions["date"].unique()):
-            st.subheader(forecast_date)
-
-            top_three = get_top_activities_for_date(
-                filtered_predictions,
-                forecast_date,
-                n=3,
-            )
-
-            top_cols = st.columns(3)
-
-            for col, (_, top_row) in zip(top_cols, top_three.iterrows()):
-                with col:
-                    st.markdown(
-                        score_badge_html(
-                            top_row["predicted_score"],
-                            top_row["label"],
-                        ),
-                        unsafe_allow_html=True,
-                    )
-                    st.write(f"**{activity_label(top_row['activity'])}**")
-
-            day_predictions = filtered_predictions[
-                filtered_predictions["date"] == forecast_date
-            ].sort_values("predicted_score", ascending=False)
-
-            if show_all_activity_details:
-                display_day_predictions = day_predictions
-            else:
-                display_day_predictions = day_predictions.head(3)
-
-            for _, row in display_day_predictions.iterrows():
-                recommended_window, window_score = get_recommended_window_for_activity(
-                    time_recommendations=time_recommendations,
-                    selected_date=row["date"],
-                    selected_activity=row["activity"],
-                )
-
-                title = (
-                    f"{activity_label(row['activity'])}: {row['predicted_score']} "
-                    f"({row['label']})"
-                )
-
-                with st.expander(title):
-                    st.markdown(
-                        score_badge_html(
-                            row["predicted_score"],
-                            row["label"],
-                        ),
-                        unsafe_allow_html=True,
-                    )
-
-                    st.write(f"**Recommended window:** {recommended_window}")
-
-                    if window_score is not None:
-                        st.write(f"**Window score:** {window_score}")
-
-                    st.write(
-                        f"**Weather:** {row.get('avg_temp', 'N/A')}°F, "
-                        f"wind {row.get('wind_max', 'N/A')} mph, "
-                        f"gusts {row.get('gust_max', 'N/A')} mph, "
-                        f"rain {row.get('rain_chance', 'N/A')}%, "
-                        f"bugs {row.get('bug_index', 'N/A')}, "
-                        f"water temp est: {row.get('water_temp_est', 'N/A')}°F"
-                    )
-
-                    st.write(f"**Warnings:** {dashboard_warning_text(row)}")
-
-                    st.write("**Why this score:**")
-                    st.write(row["explanation"])
-
-                    st.write("**Gear / Safety Notes:**")
-                    st.write(row["gear_notes"])
-
-                    if row["activity"] == "Fishing":
-                        species_breakdown = row.get("species_breakdown", [])
-
-                        if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
-                            st.markdown("#### 🎣 Species Deeper Dive")
-
-                            best_species = species_breakdown[0]
-
-                            st.success(
-                                f"Best target: {best_species['species']} "
-                                f"with score {best_species['score']} ({best_species['label']})"
-                            )
-
-                            species_table = pd.DataFrame(species_breakdown)
-
-                            st.dataframe(
-                                species_table[
-                                    [
-                                        "species",
-                                        "score",
-                                        "label",
-                                        "explanation",
-                                    ]
-                                ],
-                                width="stretch",
-                            )
-
-                    st.caption(
-                        f"Base score: {row.get('base_predicted_score', row['predicted_score'])} | "
-                        f"Preference adjustment: {row.get('preference_adjustment', 0)}"
-                    )
-
-            if not show_all_activity_details and len(day_predictions) > 3:
-                st.caption(
-                    "Showing top 3 activities. Check 'Show all activity details' to view everything."
-                )
+    if len(filtered_predictions) == 0:
+        st.info("No activities selected.")
 
     else:
-        st.dataframe(
-            filtered_predictions.sort_values(["date", "activity"]),
-            width="stretch",
-        )
+        # -------------------------
+        # Dashboard
+        # -------------------------
 
-    st.header("Best Days This Forecast")
+        st.subheader("Dashboard")
 
-    summary_rows = []
-
-    for activity in sorted(filtered_predictions["activity"].unique()):
-        activity_predictions = filtered_predictions[
-            filtered_predictions["activity"] == activity
-        ]
-
-        if len(activity_predictions) == 0:
-            continue
-
-        best_index = activity_predictions["predicted_score"].idxmax()
-        best_row = activity_predictions.loc[best_index]
-
-        recommended_window, window_score = get_recommended_window_for_activity(
+        best_by_day = build_best_by_day_table(
+            predictions=filtered_predictions,
             time_recommendations=time_recommendations,
-            selected_date=best_row["date"],
-            selected_activity=activity,
         )
 
-        summary_rows.append({
-            "Activity": activity,
-            "Best Date": best_row["date"],
-            "Best Score": best_row["predicted_score"],
-            "Label": best_row["label"],
-            "Recommended Window": recommended_window,
-            "Window Score": window_score,
-            "Main Reason": best_row["explanation"],
-        })
+        if len(best_by_day) > 0:
+            today_best = best_by_day.iloc[0]
 
-    best_days_summary = pd.DataFrame(summary_rows)
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
 
-    st.dataframe(
-        best_days_summary,
-        width="stretch",
-    )
+            with metric_col1:
+                st.metric(
+                    "Next Best Activity",
+                    today_best["Best Activity"],
+                    today_best["Label"],
+                )
 
-    st.subheader("Score Chart")
+            with metric_col2:
+                st.metric(
+                    "Score",
+                    int(today_best["Score"]),
+                )
 
-    chart_data = filtered_predictions.pivot(
-        index="date",
-        columns="activity",
-        values="predicted_score",
-    )
+            with metric_col3:
+                st.metric(
+                    "Best Window",
+                    today_best["Recommended Window"],
+                )
 
-    st.line_chart(chart_data)
-
-
-    st.download_button(
-        label="Download latest predictions as CSV",
-        data=predictions.to_csv(index=False),
-        file_name="latest_predictions.csv",
-        mime="text/csv",
-    )
-
-    with st.expander("View baseline hobby rules", expanded=False):
-        baseline_rules = load_baseline_hobby_rules()
-
-        if len(baseline_rules) == 0:
-            st.info("No baseline hobby rules found.")
-        else:
-            selected_rule_hobby = st.selectbox(
-                "Choose hobby rules to view",
-                options=sorted(baseline_rules["hobby"].dropna().unique()),
-                key="baseline_rules_hobby_select",
-            )
-
-            hobby_rules = get_rules_for_hobby(
-                baseline_rules,
-                selected_rule_hobby,
-            )
+            st.write("### Best Activity by Day")
 
             st.dataframe(
-                hobby_rules[
-                    [
-                        "hobby",
-                        "factor",
-                        "direction",
-                        "ideal_low",
-                        "ideal_high",
-                        "okay_low",
-                        "okay_high",
-                        "bad_low",
-                        "bad_high",
-                        "weight",
-                        "confidence",
-                        "notes",
-                    ]
-                ],
+                best_by_day,
                 width="stretch",
             )
+
+            # -------------------------
+            # Best Fishing Target
+            # -------------------------
+
+            fishing_predictions = filtered_predictions[
+                filtered_predictions["activity"] == "Fishing"
+            ].copy()
+
+            best_targets = []
+
+            for _, fishing_row in fishing_predictions.iterrows():
+                species_breakdown = fishing_row.get("species_breakdown", [])
+
+                if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+                    best_species = species_breakdown[0]
+
+                    best_targets.append(
+                        {
+                            "date": fishing_row["date"],
+                            "species": best_species["species"],
+                            "score": best_species["score"],
+                            "label": best_species["label"],
+                            "activity": "Fishing",
+                        }
+                    )
+
+            if len(best_targets) > 0:
+                best_targets_df = pd.DataFrame(best_targets)
+
+                best_target_index = best_targets_df["score"].idxmax()
+                best_target = best_targets_df.loc[best_target_index]
+
+                st.write("### Best Fishing Target")
+
+                species_col1, species_col2, species_col3 = st.columns(3)
+
+                with species_col1:
+                    st.metric(
+                        "Target",
+                        best_target["species"],
+                    )
+
+                with species_col2:
+                    st.metric(
+                        "Species Score",
+                        int(best_target["score"]),
+                        best_target["label"],
+                    )
+
+                with species_col3:
+                    species_window, _ = get_recommended_window_for_activity(
+                        time_recommendations=time_recommendations,
+                        selected_date=best_target["date"],
+                        selected_activity="Fishing",
+                    )
+
+                    st.metric(
+                        "Best Window",
+                        species_window,
+                    )
+
+        # -------------------------
+        # Show all details toggle
+        # -------------------------
+
+        show_all_activity_details = st.checkbox(
+            "Show all activity details",
+            value=False,
+        )
+
+        # -------------------------
+        # Phone-friendly forecast cards
+        # -------------------------
+
+        if phone_friendly_view:
+            for forecast_date in sorted(filtered_predictions["date"].unique()):
+                st.subheader(forecast_date)
+
+                top_three = get_top_activities_for_date(
+                    filtered_predictions,
+                    forecast_date,
+                    n=3,
+                )
+
+                top_cols = st.columns(3)
+
+                for col, (_, top_row) in zip(top_cols, top_three.iterrows()):
+                    with col:
+                        st.markdown(
+                            score_badge_html(
+                                top_row["predicted_score"],
+                                top_row["label"],
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                        st.write(f"**{activity_label(top_row['activity'])}**")
+
+                day_predictions = filtered_predictions[
+                    filtered_predictions["date"] == forecast_date
+                ].copy()
+
+                sort_column = (
+                    "planning_score"
+                    if "planning_score" in day_predictions.columns
+                    else "predicted_score"
+                )
+
+                day_predictions = day_predictions.sort_values(
+                    sort_column,
+                    ascending=False,
+                )
+
+                if show_all_activity_details:
+                    display_day_predictions = day_predictions
+                else:
+                    display_day_predictions = day_predictions.head(3)
+
+                for _, row in display_day_predictions.iterrows():
+                    recommended_window, window_score = get_recommended_window_for_activity(
+                        time_recommendations=time_recommendations,
+                        selected_date=row["date"],
+                        selected_activity=row["activity"],
+                    )
+
+                    title = (
+                        f"{activity_label(row['activity'])}: "
+                        f"{row['predicted_score']} ({row['label']})"
+                    )
+
+                    with st.expander(title):
+                        st.markdown(
+                            score_badge_html(
+                                row["predicted_score"],
+                                row["label"],
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                        st.write(f"**Recommended window:** {recommended_window}")
+
+                        if window_score is not None:
+                            st.write(f"**Window score:** {window_score}")
+
+                        st.write(
+                            f"**Forecast confidence:** "
+                            f"{row.get('forecast_confidence', 'N/A')} "
+                            f"({row.get('forecast_confidence_label', 'N/A')})"
+                        )
+
+                        st.write(
+                            f"**Planning score:** {row.get('planning_score', 'N/A')}"
+                        )
+
+                        st.write(
+                            f"**Weather:** {row.get('avg_temp', 'N/A')}°F, "
+                            f"wind {row.get('wind_max', 'N/A')} mph, "
+                            f"gusts {row.get('gust_max', 'N/A')} mph, "
+                            f"rain {row.get('rain_chance', 'N/A')}%, "
+                            f"bugs {row.get('bug_index', 'N/A')}, "
+                            f"water temp est: {row.get('water_temp_est', 'N/A')}°F"
+                        )
+
+                        st.write(f"**Warnings:** {dashboard_warning_text(row)}")
+
+                        st.write("**Why this score:**")
+                        st.write(row["explanation"])
+
+                        st.write("**Gear / Safety Notes:**")
+                        st.write(row["gear_notes"])
+
+                        if row["activity"] == "Fishing":
+                            species_breakdown = row.get("species_breakdown", [])
+
+                            if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+                                st.markdown("#### 🎣 Species Deeper Dive")
+
+                                best_species = species_breakdown[0]
+
+                                st.success(
+                                    f"Best target: {best_species['species']} "
+                                    f"with score {best_species['score']} "
+                                    f"({best_species['label']})"
+                                )
+
+                                species_table = pd.DataFrame(species_breakdown)
+
+                                st.dataframe(
+                                    species_table[
+                                        [
+                                            "species",
+                                            "score",
+                                            "label",
+                                            "explanation",
+                                        ]
+                                    ],
+                                    width="stretch",
+                                )
+
+                        st.caption(
+                            f"Base score: "
+                            f"{row.get('base_predicted_score', row['predicted_score'])} | "
+                            f"Preference adjustment: "
+                            f"{row.get('preference_adjustment', 0)}"
+                        )
+
+                if not show_all_activity_details and len(day_predictions) > 3:
+                    st.caption(
+                        "Showing top 3 activities. Check 'Show all activity details' "
+                        "to view everything."
+                    )
+
+        else:
+            st.dataframe(
+                filtered_predictions.sort_values(["date", "activity"]),
+                width="stretch",
+            )
+
+        # -------------------------
+        # Score chart
+        # -------------------------
+
+        st.subheader("Score Chart")
+
+        chart_data = filtered_predictions.pivot(
+            index="date",
+            columns="activity",
+            values="predicted_score",
+        )
+
+        st.line_chart(chart_data)
+
+        # -------------------------
+        # Download predictions
+        # -------------------------
+
+        st.download_button(
+            label="Download latest predictions as CSV",
+            data=predictions.to_csv(index=False),
+            file_name="latest_predictions.csv",
+            mime="text/csv",
+        )
+
+        # -------------------------
+        # Baseline rules viewer
+        # -------------------------
+
+        with st.expander("View baseline hobby rules", expanded=False):
+            baseline_rules = load_baseline_hobby_rules()
+
+            if len(baseline_rules) == 0:
+                st.info("No baseline hobby rules found.")
+
+            else:
+                selected_rule_hobby = st.selectbox(
+                    "Choose hobby rules to view",
+                    options=sorted(baseline_rules["hobby"].dropna().unique()),
+                    key="baseline_rules_hobby_select",
+                )
+
+                hobby_rules = get_rules_for_hobby(
+                    baseline_rules,
+                    selected_rule_hobby,
+                )
+
+                st.dataframe(
+                    hobby_rules[
+                        [
+                            "hobby",
+                            "factor",
+                            "direction",
+                            "ideal_low",
+                            "ideal_high",
+                            "okay_low",
+                            "okay_high",
+                            "bad_low",
+                            "bad_high",
+                            "weight",
+                            "confidence",
+                            "notes",
+                        ]
+                    ],
+                    width="stretch",
+                )
 
 with weekend_tab:
     st.header("Weekend Planner")
@@ -4686,8 +5388,14 @@ with weekend_tab:
     else:
         st.write("### Top Weekend Opportunities")
 
+        sort_column = (
+            "planning_score"
+            if "planning_score" in weekend_predictions.columns
+            else "predicted_score"
+        )
+
         top_weekend = weekend_predictions.sort_values(
-            "predicted_score",
+            sort_column,
             ascending=False,
         ).head(8)
 
@@ -4713,6 +5421,16 @@ with weekend_tab:
 
                     if window_score is not None:
                         st.write(f"**Window score:** {window_score}")
+
+                    st.write(
+                        f"**Forecast confidence:** "
+                        f"{row.get('forecast_confidence', 'N/A')} "
+                        f"({row.get('forecast_confidence_label', 'N/A')})"
+                    )
+
+                    st.write(
+                        f"**Planning score:** {row.get('planning_score', 'N/A')}"
+                    )
 
                     st.write(f"**Why:** {row['explanation']}")
                     st.write(f"**Gear/Safety:** {row['gear_notes']}")
@@ -4752,6 +5470,9 @@ with weekend_tab:
 
                     calendar_description = (
                         f"Predicted score: {row['predicted_score']} ({row['label']})\n"
+                        f"Forecast confidence: {row.get('forecast_confidence', 'N/A')} "
+                        f"({row.get('forecast_confidence_label', 'N/A')})\n"
+                        f"Planning score: {row.get('planning_score', 'N/A')}\n"
                         f"Recommended window: {recommended_window}\n\n"
                         f"Why: {row['explanation']}\n\n"
                         f"Gear/Safety: {row['gear_notes']}\n\n"
@@ -4786,9 +5507,20 @@ with weekend_tab:
         st.write("### Best by Weekend Day")
 
         for weekend_date in sorted(weekend_predictions["date"].unique()):
-            day_rows = weekend_predictions[
+            day_rows_for_date = weekend_predictions[
                 weekend_predictions["date"] == weekend_date
-            ].sort_values("predicted_score", ascending=False)
+            ].copy()
+
+            day_sort_column = (
+                "planning_score"
+                if "planning_score" in day_rows_for_date.columns
+                else "predicted_score"
+            )
+
+            day_rows = day_rows_for_date.sort_values(
+                day_sort_column,
+                ascending=False,
+            )
 
             if len(day_rows) == 0:
                 continue
@@ -4804,7 +5536,12 @@ with weekend_tab:
             st.metric(
                 label=f"{weekend_date}",
                 value=activity_label(best["activity"]),
-                delta=f"{int(best['predicted_score'])} · {best['label']} · {recommended_window}",
+                delta=(
+                    f"Activity {int(best['predicted_score'])} · "
+                    f"Planning {best.get('planning_score', 'N/A')} · "
+                    f"{best.get('forecast_confidence_label', 'N/A')} · "
+                    f"{recommended_window}"
+                ),
             )
 
         fishing_species = [
@@ -4925,6 +5662,265 @@ with times_tab:
         time_recommendations,
         width="stretch",
     )
+
+with locations_tab:
+    st.header("Saved Locations")
+
+    saved_locations = load_saved_locations()
+
+    st.subheader("Add New Location")
+
+    with st.form("add_saved_location_form"):
+        new_location_name = st.text_input(
+            "Location name",
+            placeholder="Example: Local Pond, Tennis Courts, Kayak Launch",
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            new_location_latitude = st.number_input(
+                "Latitude",
+                format="%.6f",
+                value=float(latitude),
+            )
+
+        with col2:
+            new_location_longitude = st.number_input(
+                "Longitude",
+                format="%.6f",
+                value=float(longitude),
+            )
+
+        location_type_options = [
+            "Home",
+            "Lake",
+            "River",
+            "Pond",
+            "Beach",
+            "Park",
+            "Disc Golf Course",
+            "Tennis Courts",
+            "Campground",
+            "Trail",
+            "Other",
+        ]
+
+        new_location_type = st.selectbox(
+            "Location type",
+            options=location_type_options,
+        )
+
+        water_type_options = [
+            "Not applicable",
+            "Freshwater lake",
+            "River",
+            "Pond",
+            "Great Lake",
+            "Ocean/coastal",
+            "Unknown",
+        ]
+
+        new_water_type = st.selectbox(
+            "Water type",
+            options=water_type_options,
+        )
+
+        activity_options = sorted(predictions["activity"].unique())
+
+        new_default_activities = st.multiselect(
+            "Default activities for this location",
+            options=activity_options,
+        )
+
+        use_location_water_temp = st.checkbox(
+            "Set manual water temperature for this location",
+            value=False,
+        )
+
+        if use_location_water_temp:
+            new_manual_water_temp = st.number_input(
+                "Manual water temperature °F",
+                min_value=32,
+                max_value=95,
+                value=65,
+            )
+        else:
+            new_manual_water_temp = None
+
+        new_location_notes = st.text_area(
+            "Notes",
+            placeholder="Example: sheltered from wind, muddy after rain, good bass spot",
+        )
+
+        submitted_location = st.form_submit_button("Save Location")
+
+        if submitted_location:
+            if new_location_name.strip() == "":
+                st.error("Location name is required.")
+            else:
+                save_saved_location({
+                    "name": new_location_name,
+                    "latitude": new_location_latitude,
+                    "longitude": new_location_longitude,
+                    "location_type": new_location_type,
+                    "water_type": new_water_type,
+                    "default_activities": new_default_activities,
+                    "manual_water_temp": new_manual_water_temp,
+                    "notes": new_location_notes,
+                })
+
+                st.success("Location saved.")
+                st.rerun()
+
+    st.subheader("Existing Locations")
+
+    if len(saved_locations) == 0:
+        st.info("No saved locations yet.")
+
+    else:
+        st.dataframe(
+            saved_locations,
+            width="stretch",
+        )
+
+        saved_locations["display_label"] = (
+            saved_locations["id"].astype(str)
+            + " | "
+            + saved_locations["name"].astype(str)
+            + " | "
+            + saved_locations["location_type"].astype(str)
+        )
+
+        selected_location_label = st.selectbox(
+            "Choose location to edit/delete",
+            options=saved_locations["display_label"].tolist(),
+            key="edit_saved_location_selectbox",
+        )
+
+        selected_location = saved_locations[
+            saved_locations["display_label"] == selected_location_label
+        ].iloc[0]
+
+        selected_location_id = int(selected_location["id"])
+
+        with st.expander("Edit selected location", expanded=False):
+            edit_location_name = st.text_input(
+                "Location name",
+                value=str(selected_location.get("name", "")),
+                key=f"edit_location_name_{selected_location_id}",
+            )
+
+            edit_col1, edit_col2 = st.columns(2)
+
+            with edit_col1:
+                edit_latitude = st.number_input(
+                    "Latitude",
+                    format="%.6f",
+                    value=float(selected_location.get("latitude", latitude)),
+                    key=f"edit_location_lat_{selected_location_id}",
+                )
+
+            with edit_col2:
+                edit_longitude = st.number_input(
+                    "Longitude",
+                    format="%.6f",
+                    value=float(selected_location.get("longitude", longitude)),
+                    key=f"edit_location_lon_{selected_location_id}",
+                )
+
+            edit_location_type = st.selectbox(
+                "Location type",
+                options=location_type_options,
+                index=location_type_options.index(selected_location.get("location_type"))
+                if selected_location.get("location_type") in location_type_options
+                else 0,
+                key=f"edit_location_type_{selected_location_id}",
+            )
+
+            edit_water_type = st.selectbox(
+                "Water type",
+                options=water_type_options,
+                index=water_type_options.index(selected_location.get("water_type"))
+                if selected_location.get("water_type") in water_type_options
+                else 0,
+                key=f"edit_water_type_{selected_location_id}",
+            )
+
+            current_default_activities = selected_location.get("default_activities", [])
+
+            if not isinstance(current_default_activities, list):
+                current_default_activities = []
+
+            edit_default_activities = st.multiselect(
+                "Default activities",
+                options=activity_options,
+                default=[
+                    activity
+                    for activity in current_default_activities
+                    if activity in activity_options
+                ],
+                key=f"edit_default_activities_{selected_location_id}",
+            )
+
+            current_water_temp = selected_location.get("manual_water_temp")
+
+            use_edit_water_temp = st.checkbox(
+                "Set manual water temperature for this location",
+                value=not pd.isna(current_water_temp),
+                key=f"edit_use_water_temp_{selected_location_id}",
+            )
+
+            if use_edit_water_temp:
+                edit_manual_water_temp = st.number_input(
+                    "Manual water temperature °F",
+                    min_value=32,
+                    max_value=95,
+                    value=65 if pd.isna(current_water_temp) else int(float(current_water_temp)),
+                    key=f"edit_manual_water_temp_{selected_location_id}",
+                )
+            else:
+                edit_manual_water_temp = None
+
+            edit_notes = st.text_area(
+                "Notes",
+                value="" if pd.isna(selected_location.get("notes")) else str(selected_location.get("notes")),
+                key=f"edit_location_notes_{selected_location_id}",
+            )
+
+            if st.button("Save location edits", key=f"save_location_edits_{selected_location_id}"):
+                update_saved_location(
+                    selected_location_id,
+                    {
+                        "name": edit_location_name,
+                        "latitude": edit_latitude,
+                        "longitude": edit_longitude,
+                        "location_type": edit_location_type,
+                        "water_type": edit_water_type,
+                        "default_activities": edit_default_activities,
+                        "manual_water_temp": edit_manual_water_temp,
+                        "notes": edit_notes,
+                    },
+                )
+
+                st.success("Location updated.")
+                st.rerun()
+
+        with st.expander("Danger zone: delete location", expanded=False):
+            st.warning("Deleting a saved location cannot be undone.")
+
+            confirm_delete_location = st.checkbox(
+                "Yes, delete this saved location",
+                key=f"confirm_delete_location_{selected_location_id}",
+            )
+
+            if st.button("Delete saved location", key=f"delete_location_{selected_location_id}"):
+                if confirm_delete_location:
+                    delete_saved_location(selected_location_id)
+                    st.success("Location deleted.")
+                    st.rerun()
+                else:
+                    st.warning("Check the confirmation box before deleting.")
 
 # -------------------------
 # Log actual result
