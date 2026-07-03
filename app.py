@@ -2,7 +2,8 @@ import os
 import json
 import time
 import math
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from urllib import response
 
 import pandas as pd
@@ -472,6 +473,173 @@ def get_weekend_predictions(predictions):
     ].copy()
 
     return weekend
+
+
+def escape_ics_text(text):
+    """
+    Escapes text for .ics calendar format.
+    """
+
+    if text is None:
+        return ""
+
+    text = str(text)
+    text = text.replace("\\", "\\\\")
+    text = text.replace(",", "\\,")
+    text = text.replace(";", "\\;")
+    text = text.replace("\n", "\\n")
+
+    return text
+
+
+def parse_time_window_for_calendar(date_string, window_string):
+    """
+    Converts a date and window like '6:00 PM–8:00 PM'
+    into start/end datetime objects.
+
+    If the window cannot be parsed, returns a default 1-hour midday event.
+    """
+
+    try:
+        date_dt = pd.to_datetime(date_string).date()
+    except Exception:
+        date_dt = datetime.today().date()
+
+    def default_window():
+        start_dt = datetime.combine(
+            date_dt,
+            datetime.strptime("12:00 PM", "%I:%M %p").time(),
+        )
+        end_dt = start_dt + timedelta(hours=1)
+        return start_dt, end_dt
+
+    # Handle missing, NaN, None, non-string windows
+    if window_string is None:
+        return default_window()
+
+    try:
+        if pd.isna(window_string):
+            return default_window()
+    except Exception:
+        pass
+
+    if not isinstance(window_string, str):
+        return default_window()
+
+    window_string = window_string.strip()
+
+    if window_string == "":
+        return default_window()
+
+    lower_window = window_string.lower()
+
+    if (
+        "not available" in lower_window
+        or "full-day" in lower_window
+        or "full day" in lower_window
+        or "n/a" in lower_window
+        or "none" == lower_window
+    ):
+        return default_window()
+
+    # Normalize dash types
+    window_string = (
+        window_string
+        .replace("—", "–")
+        .replace("-", "–")
+    )
+
+    parts = [part.strip() for part in window_string.split("–")]
+
+    if len(parts) != 2:
+        return default_window()
+
+    start_text = parts[0]
+    end_text = parts[1]
+
+    possible_formats = [
+        "%I:%M %p",
+        "%I %p",
+        "%H:%M",
+    ]
+
+    def parse_time_text(time_text):
+        for fmt in possible_formats:
+            try:
+                return datetime.strptime(time_text, fmt).time()
+            except Exception:
+                continue
+
+        return None
+
+    start_time = parse_time_text(start_text)
+    end_time = parse_time_text(end_text)
+
+    if start_time is None or end_time is None:
+        return default_window()
+
+    start_dt = datetime.combine(date_dt, start_time)
+    end_dt = datetime.combine(date_dt, end_time)
+
+    # If the window crosses midnight, move end time to the next day
+    if end_dt <= start_dt:
+        end_dt = end_dt + timedelta(days=1)
+
+    return start_dt, end_dt
+
+
+def format_ics_datetime(dt):
+    """
+    Formats datetime for .ics as floating local time.
+    Calendar apps will interpret it in the user's local timezone.
+    """
+
+    return dt.strftime("%Y%m%dT%H%M%S")
+
+
+def create_calendar_event_ics(
+    title,
+    start_dt,
+    end_dt,
+    description,
+    location="",
+):
+    """
+    Creates an .ics calendar event string.
+    """
+
+    now_stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    uid = f"{now_stamp}-{abs(hash(title + str(start_dt)))}@hobby-weather-app"
+
+    ics_content = f"""BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Hobby Weather Planner//EN
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+UID:{uid}
+DTSTAMP:{now_stamp}
+DTSTART:{format_ics_datetime(start_dt)}
+DTEND:{format_ics_datetime(end_dt)}
+SUMMARY:{escape_ics_text(title)}
+DESCRIPTION:{escape_ics_text(description)}
+LOCATION:{escape_ics_text(location)}
+END:VEVENT
+END:VCALENDAR
+"""
+
+    return ics_content
+
+
+def clean_filename(text):
+    """
+    Creates a safe filename.
+    """
+
+    text = str(text).lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = text.strip("-")
+
+    return text
 
 def get_json_with_retries(url, params, timeout=12, retries=2, backoff_seconds=1):
     """
@@ -4048,12 +4216,12 @@ with weekend_tab:
         st.info("No Saturday or Sunday dates are included in the current forecast.")
 
     else:
-        st.write("### Best Weekend Activities")
+        st.write("### Top Weekend Opportunities")
 
         top_weekend = weekend_predictions.sort_values(
             "predicted_score",
             ascending=False,
-        ).head(5)
+        ).head(8)
 
         for _, row in top_weekend.iterrows():
             recommended_window, window_score = get_recommended_window_for_activity(
@@ -4063,14 +4231,89 @@ with weekend_tab:
             )
 
             with st.container(border=True):
-                st.subheader(f"{activity_label(row['activity'])} — {row['date']}")
-                st.markdown(
-                    score_badge_html(row["predicted_score"], row["label"]),
-                    unsafe_allow_html=True,
-                )
-                st.write(f"**Best window:** {recommended_window}")
-                st.write(f"**Why:** {row['explanation']}")
-                st.write(f"**Gear/Safety:** {row['gear_notes']}")
+                col1, col2 = st.columns([2, 1])
+
+                with col1:
+                    st.subheader(f"{activity_label(row['activity'])} — {row['date']}")
+
+                    st.markdown(
+                        score_badge_html(row["predicted_score"], row["label"]),
+                        unsafe_allow_html=True,
+                    )
+
+                    st.write(f"**Best window:** {recommended_window}")
+
+                    if window_score is not None:
+                        st.write(f"**Window score:** {window_score}")
+
+                    st.write(f"**Why:** {row['explanation']}")
+                    st.write(f"**Gear/Safety:** {row['gear_notes']}")
+
+                    if row["activity"] == "Fishing":
+                        species_breakdown = row.get("species_breakdown", [])
+
+                        if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+                            best_species = species_breakdown[0]
+
+                            st.success(
+                                f"Best fishing target: {best_species['species']} "
+                                f"({best_species['score']} · {best_species['label']})"
+                            )
+
+                with col2:
+                    try:
+                        start_dt, end_dt = parse_time_window_for_calendar(
+                            row["date"],
+                            recommended_window,
+                        )
+                    except Exception:
+                        start_dt = datetime.combine(
+                            pd.to_datetime(row["date"]).date(),
+                            datetime.strptime("12:00 PM", "%I:%M %p").time(),
+                        )
+                        end_dt = start_dt + timedelta(hours=1)
+
+                    calendar_title = f"{row['activity']}"
+
+                    if row["activity"] == "Fishing":
+                        species_breakdown = row.get("species_breakdown", [])
+
+                        if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+                            best_species = species_breakdown[0]
+                            calendar_title = f"Fishing - Target {best_species['species']}"
+
+                    calendar_description = (
+                        f"Predicted score: {row['predicted_score']} ({row['label']})\n"
+                        f"Recommended window: {recommended_window}\n\n"
+                        f"Why: {row['explanation']}\n\n"
+                        f"Gear/Safety: {row['gear_notes']}\n\n"
+                        f"Weather: {row.get('avg_temp', 'N/A')}°F, "
+                        f"wind {row.get('wind_max', 'N/A')} mph, "
+                        f"rain {row.get('rain_chance', 'N/A')}%, "
+                        f"bugs {row.get('bug_index', 'N/A')}, "
+                        f"water temp est {row.get('water_temp_est', 'N/A')}°F"
+                    )
+
+                    ics_file = create_calendar_event_ics(
+                        title=calendar_title,
+                        start_dt=start_dt,
+                        end_dt=end_dt,
+                        description=calendar_description,
+                        location="",
+                    )
+
+                    filename = (
+                        f"{clean_filename(row['activity'])}-"
+                        f"{row['date']}.ics"
+                    )
+
+                    st.download_button(
+                        label="Add to calendar",
+                        data=ics_file,
+                        file_name=filename,
+                        mime="text/calendar",
+                        key=f"calendar_{row['date']}_{row['activity']}",
+                    )
 
         st.write("### Best by Weekend Day")
 
@@ -4078,6 +4321,9 @@ with weekend_tab:
             day_rows = weekend_predictions[
                 weekend_predictions["date"] == weekend_date
             ].sort_values("predicted_score", ascending=False)
+
+            if len(day_rows) == 0:
+                continue
 
             best = day_rows.iloc[0]
 
@@ -4115,6 +4361,88 @@ with weekend_tab:
             st.success(
                 f"{activity_label(best_fishing['activity'])} on {best_fishing['date']} "
                 f"with score {int(best_fishing['predicted_score'])}."
+            )
+            st.write("### Create Custom Weekend Plan")
+
+        weekend_dates = sorted(weekend_predictions["date"].unique())
+
+        custom_col1, custom_col2 = st.columns(2)
+
+        with custom_col1:
+            custom_date = st.selectbox(
+                "Plan date",
+                options=weekend_dates,
+                key="custom_plan_date",
+            )
+
+        with custom_col2:
+            custom_activity_options = sorted(
+                weekend_predictions[
+                    weekend_predictions["date"] == custom_date
+                ]["activity"].unique()
+            )
+
+            custom_activity = st.selectbox(
+                "Plan activity",
+                options=custom_activity_options,
+                key="custom_plan_activity",
+            )
+
+        custom_rows = weekend_predictions[
+            (weekend_predictions["date"] == custom_date) &
+            (weekend_predictions["activity"] == custom_activity)
+        ]
+
+        if len(custom_rows) > 0:
+            custom_row = custom_rows.iloc[0]
+
+            custom_window, custom_window_score = get_recommended_window_for_activity(
+                time_recommendations=time_recommendations,
+                selected_date=custom_date,
+                selected_activity=custom_activity,
+            )
+
+            st.write(f"Recommended window: **{custom_window}**")
+
+            custom_location = st.text_input(
+                "Calendar location",
+                placeholder="Example: Huron River launch, local park, disc golf course",
+                key="custom_calendar_location",
+            )
+
+            custom_notes = st.text_area(
+                "Extra calendar notes",
+                placeholder="Optional notes to add to the calendar event",
+                key="custom_calendar_notes",
+            )
+
+            custom_start_dt, custom_end_dt = parse_time_window_for_calendar(
+                custom_date,
+                custom_window,
+            )
+
+            custom_description = (
+                f"Predicted score: {custom_row['predicted_score']} ({custom_row['label']})\n"
+                f"Recommended window: {custom_window}\n\n"
+                f"Why: {custom_row['explanation']}\n\n"
+                f"Gear/Safety: {custom_row['gear_notes']}\n\n"
+                f"Extra notes: {custom_notes}"
+            )
+
+            custom_ics = create_calendar_event_ics(
+                title=custom_activity,
+                start_dt=custom_start_dt,
+                end_dt=custom_end_dt,
+                description=custom_description,
+                location=custom_location,
+            )
+
+            st.download_button(
+                label="Download custom calendar plan",
+                data=custom_ics,
+                file_name=f"{clean_filename(custom_activity)}-{custom_date}.ics",
+                mime="text/calendar",
+                key="download_custom_calendar_plan",
             )    
 
 with times_tab:
