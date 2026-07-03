@@ -148,6 +148,48 @@ def geocode_place(place):
 
     return results
 
+@st.cache_data(ttl=3600)
+def load_baseline_hobby_rules():
+    """
+    Loads baseline hobby rules from Supabase.
+    """
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("baseline_hobby_rules")
+            .select("*")
+            .order("hobby")
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return pd.DataFrame()
+
+        return pd.DataFrame(rows)
+
+    except Exception as e:
+        st.warning("Could not load baseline hobby rules.")
+        st.write(e)
+        return pd.DataFrame()
+
+
+def get_rules_for_hobby(rules_df, hobby):
+    """
+    Returns rules for one hobby.
+    """
+
+    if rules_df is None or len(rules_df) == 0:
+        return pd.DataFrame()
+
+    return rules_df[
+        rules_df["hobby"] == hobby
+    ].copy()
+
 # =========================
 # General helper functions
 # =========================
@@ -352,6 +394,230 @@ def build_tuning_suggestions(activity_log):
         suggestions.append("No strong tuning suggestions yet. Keep logging more activities.")
 
     return suggestions
+
+FACTOR_METRIC_MAP = {
+    "temperature": "temp_avg",
+    "wind_speed": "wind_max",
+    "wind_gust": "gust_max",
+    "rain_chance": "precip_probability_max",
+    "humidity": "humidity_avg",
+    "cloud_cover": "cloud_avg",
+    "pressure_change": "pressure_change",
+    "bug_index": "bug_activity_index",
+    "water_temp": "estimated_water_temp",
+    "storm_safety": "storm_safety_score",
+    "ground_dryness": "ground_dryness_score",
+    "dew_point": "dew_point_max",
+    "aqi": "aqi_max",
+    "uv_index": "uv_index_max",
+}
+
+
+HARDCODED_ACTIVITIES = {
+    "Fishing",
+    "Camping",
+    "Running",
+    "Kayaking",
+    "Disc Golf",
+}
+
+
+def get_rule_number(rule, column_name, default=None):
+    """
+    Safely gets a numeric value from a rule row.
+    """
+
+    value = rule.get(column_name, default)
+
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def high_is_good_score(value, ideal_min, bad_at):
+    """
+    Scores something where higher is better.
+
+    Example:
+    storm safety:
+    85+ is good.
+    40 or lower is bad.
+    """
+
+    if pd.isna(value):
+        return 50
+
+    if value >= ideal_min:
+        return 100
+
+    if value <= bad_at:
+        return 0
+
+    return 100 * (value - bad_at) / (ideal_min - bad_at)
+
+
+def score_value_from_rule(value, rule):
+    """
+    Scores one weather/environment value using one baseline rule.
+    """
+
+    direction = str(rule.get("direction", "")).lower()
+
+    ideal_low = get_rule_number(rule, "ideal_low")
+    ideal_high = get_rule_number(rule, "ideal_high")
+    okay_low = get_rule_number(rule, "okay_low")
+    okay_high = get_rule_number(rule, "okay_high")
+    bad_low = get_rule_number(rule, "bad_low")
+    bad_high = get_rule_number(rule, "bad_high")
+
+    if pd.isna(value):
+        return 50
+
+    if direction == "range":
+        if ideal_low is None or ideal_high is None:
+            return 50
+
+        absolute_low = okay_low if okay_low is not None else ideal_low - 20
+        absolute_high = okay_high if okay_high is not None else ideal_high + 20
+
+        return range_score(
+            value=value,
+            ideal_low=ideal_low,
+            ideal_high=ideal_high,
+            absolute_low=absolute_low,
+            absolute_high=absolute_high,
+        )
+
+    if direction == "low":
+        ideal_max = ideal_high if ideal_high is not None else ideal_low
+
+        if ideal_max is None:
+            return 50
+
+        bad_at = bad_low if bad_low is not None else okay_high
+
+        if bad_at is None:
+            bad_at = ideal_max + 20
+
+        return low_is_good_score(
+            value=value,
+            ideal_max=ideal_max,
+            bad_at=bad_at,
+        )
+
+    if direction == "high":
+        ideal_min = ideal_low if ideal_low is not None else ideal_high
+
+        if ideal_min is None:
+            return 50
+
+        bad_at = bad_high if bad_high is not None else okay_low
+
+        if bad_at is None:
+            bad_at = ideal_min - 20
+
+        return high_is_good_score(
+            value=value,
+            ideal_min=ideal_min,
+            bad_at=bad_at,
+        )
+
+    return 50
+
+
+def score_hobby_from_rules(day_row, hobby_name, hobby_rules):
+    """
+    Dynamically scores a hobby using baseline_hobby_rules from Supabase.
+    """
+
+    if hobby_rules is None or len(hobby_rules) == 0:
+        return 50, f"No baseline rules found for {hobby_name}."
+
+    weighted_score = 0
+    total_weight = 0
+    factor_details = []
+
+    for _, rule in hobby_rules.iterrows():
+        factor = rule.get("factor")
+
+        metric = FACTOR_METRIC_MAP.get(factor)
+
+        if metric is None:
+            continue
+
+        if metric not in day_row:
+            continue
+
+        value = day_row[metric]
+
+        factor_score = score_value_from_rule(value, rule)
+
+        weight = get_rule_number(rule, "weight", default=1)
+
+        if weight is None:
+            weight = 1
+
+        weighted_score += factor_score * weight
+        total_weight += weight
+
+        factor_details.append({
+            "factor": factor,
+            "metric": metric,
+            "value": value,
+            "score": factor_score,
+            "weight": weight,
+            "confidence": rule.get("confidence", ""),
+            "notes": rule.get("notes", ""),
+        })
+
+    if total_weight == 0:
+        return 50, f"No usable scoring rules found for {hobby_name}."
+
+    final_score = round(clamp_score(weighted_score / total_weight))
+
+    weak_factors = sorted(
+        factor_details,
+        key=lambda item: item["score"],
+    )[:2]
+
+    strong_factors = sorted(
+        factor_details,
+        key=lambda item: item["score"],
+        reverse=True,
+    )[:2]
+
+    explanation_parts = []
+
+    if len(strong_factors) > 0:
+        strong_text = ", ".join(
+            f"{item['factor']} scored {item['score']:.0f}"
+            for item in strong_factors
+        )
+
+        explanation_parts.append(f"strongest factors: {strong_text}")
+
+    if len(weak_factors) > 0:
+        weak_text = ", ".join(
+            f"{item['factor']} scored {item['score']:.0f}"
+            for item in weak_factors
+        )
+
+        explanation_parts.append(f"weakest factors: {weak_text}")
+
+    explanation = (
+        f"{hobby_name} score is based on source-backed baseline rules. "
+        + "; ".join(explanation_parts)
+        + "."
+    )
+
+    return final_score, explanation
 
 def build_accuracy_report(activity_log):
     """
@@ -697,7 +963,7 @@ def make_forecast_cache_key(latitude, longitude, forecast_days, manual_water_tem
 
     preferences_key = tuple(sorted(preferences.items()))
 
-    cache_version = "species_nested_v1"
+    cache_version = "dynamic_rules_v1"
 
     return (
         f"{cache_version}_"
@@ -798,15 +1064,12 @@ def clamp_score(score):
 
 ACTIVITY_ICONS = {
     "Fishing": "🎣",
-    "Bass Fishing": "🐟",
-    "Trout Fishing": "🐟",
-    "Walleye Fishing": "🐟",
-    "Pike Fishing": "🐟",
-    "Panfish Fishing": "🐟",
     "Camping": "⛺",
     "Running": "🏃",
     "Kayaking": "🛶",
     "Disc Golf": "🥏",
+    "Tennis": "🎾",
+    "Beach Day": "🏖️",
 }
 
 
@@ -2125,6 +2388,17 @@ def generate_predictions(latitude, longitude, days, manual_water_temp, include_a
     daily = add_air_quality_by_day(daily, air_quality)
     daily = add_extra_features(daily, manual_water_temp)
 
+    baseline_rules = load_baseline_hobby_rules()
+
+    dynamic_hobbies = []
+
+    if len(baseline_rules) > 0:
+        dynamic_hobbies = sorted([
+            hobby
+            for hobby in baseline_rules["hobby"].dropna().unique()
+            if hobby not in HARDCODED_ACTIVITIES
+        ])
+
     rows = []
 
     for _, row in daily.iterrows():
@@ -2229,6 +2503,32 @@ def generate_predictions(latitude, longitude, days, manual_water_temp, include_a
             "gear_notes": gear_notes,
             **common_weather,
         })
+
+        # ---------------------
+        # Dynamic rule-based hobbies
+        # ---------------------
+
+        for dynamic_hobby in dynamic_hobbies:
+            hobby_rules = get_rules_for_hobby(
+                baseline_rules,
+                dynamic_hobby,
+            )
+
+            dynamic_score, dynamic_explanation = score_hobby_from_rules(
+                day_row=row,
+                hobby_name=dynamic_hobby,
+                hobby_rules=hobby_rules,
+            )
+
+            rows.append({
+                "date": row["date"],
+                "activity": dynamic_hobby,
+                "predicted_score": dynamic_score,
+                "label": score_label(dynamic_score),
+                "explanation": dynamic_explanation,
+                "gear_notes": gear_notes,
+                **common_weather,
+            })
 
     predictions = pd.DataFrame(rows)
 
@@ -2726,6 +3026,105 @@ def score_disc_golf_hour(row):
 
     return round(clamp_score(final_score))
 
+def score_tennis_hour(row):
+    """
+    Scores one hour for tennis.
+    """
+
+    light_score = row["Daylight Score"]
+
+    if light_score <= 0:
+        return 0
+
+    temp_score = range_score(
+        value=row["temperature_2m"],
+        ideal_low=55,
+        ideal_high=78,
+        absolute_low=45,
+        absolute_high=88,
+    )
+
+    wind_score = low_is_good_score(
+        value=row["wind_speed_10m"],
+        ideal_max=8,
+        bad_at=20,
+    )
+
+    rain_score = low_is_good_score(
+        value=row["precipitation_probability"],
+        ideal_max=15,
+        bad_at=70,
+    )
+
+    storm_score = hourly_storm_safety_score(row)
+
+    final_score = (
+        temp_score * 0.35 +
+        wind_score * 0.30 +
+        rain_score * 0.15 +
+        storm_score * 0.15 +
+        light_score * 0.05
+    )
+
+    if storm_score < 40:
+        final_score = min(final_score, 35)
+
+    return round(clamp_score(final_score))
+
+
+def score_beach_hour(row):
+    """
+    Scores one hour for a beach day.
+    """
+
+    light_score = row["Daylight Score"]
+
+    if light_score <= 0:
+        return 0
+
+    temp_score = range_score(
+        value=row["temperature_2m"],
+        ideal_low=75,
+        ideal_high=90,
+        absolute_low=65,
+        absolute_high=98,
+    )
+
+    wind_score = range_score(
+        value=row["wind_speed_10m"],
+        ideal_low=3,
+        ideal_high=15,
+        absolute_low=0,
+        absolute_high=25,
+    )
+
+    rain_score = low_is_good_score(
+        value=row["precipitation_probability"],
+        ideal_max=20,
+        bad_at=75,
+    )
+
+    sun_score = low_is_good_score(
+        value=row["cloud_cover"],
+        ideal_max=35,
+        bad_at=90,
+    )
+
+    storm_score = hourly_storm_safety_score(row)
+
+    final_score = (
+        temp_score * 0.35 +
+        sun_score * 0.20 +
+        wind_score * 0.15 +
+        rain_score * 0.15 +
+        storm_score * 0.10 +
+        light_score * 0.05
+    )
+
+    if storm_score < 40:
+        final_score = min(final_score, 35)
+
+    return round(clamp_score(final_score))
 
 def build_time_recommendations(hourly_df, sun_times):
     """
@@ -2818,6 +3217,15 @@ def build_time_recommendations(hourly_df, sun_times):
         axis=1,
     )
 
+    daylight_df["Tennis Time Score"] = daylight_df.apply(
+        score_tennis_hour,
+        axis=1,
+    )
+
+    daylight_df["Beach Day Time Score"] = daylight_df.apply(
+        score_beach_hour,
+        axis=1,
+    )
     # ---------------------
     # Build one row per date
     # ---------------------
@@ -2906,6 +3314,35 @@ def build_time_recommendations(hourly_df, sun_times):
         row["Best Disc Golf Window"] = disc_golf_window["window"]
         row["Disc Golf Window Score"] = disc_golf_window["score"]
 
+    # Tennis window
+        tennis_day = daylight_df[
+            daylight_df["date"] == forecast_date
+        ]
+
+        tennis_window = find_best_window(
+            tennis_day,
+            score_col="Tennis Time Score",
+            min_score=60,
+            min_hours=2,
+        )
+
+        row["Best Tennis Window"] = tennis_window["window"]
+        row["Tennis Window Score"] = tennis_window["score"]
+
+        # Beach Day window
+        beach_day = daylight_df[
+            daylight_df["date"] == forecast_date
+        ]
+
+        beach_window = find_best_window(
+            beach_day,
+            score_col="Beach Day Time Score",
+            min_score=60,
+            min_hours=2,
+        )
+
+        row["Best Beach Day Window"] = beach_window["window"]
+        row["Beach Day Window Score"] = beach_window["score"]
         recommendations.append(row)
 
     recommendations_df = pd.DataFrame(recommendations)
@@ -2929,26 +3366,20 @@ def get_recommended_window_for_activity(time_recommendations, selected_date, sel
 
     window_column_map = {
     "Fishing": "Best Fishing Window",
-    "Bass Fishing": "Best Fishing Window",
-    "Trout Fishing": "Best Fishing Window",
-    "Walleye Fishing": "Best Fishing Window",
-    "Pike Fishing": "Best Fishing Window",
-    "Panfish Fishing": "Best Fishing Window",
     "Running": "Best Running Window",
     "Kayaking": "Best Kayaking Window",
     "Disc Golf": "Best Disc Golf Window",
+    "Tennis": "Best Tennis Window",
+    "Beach Day": "Best Beach Day Window",
     }
 
     score_column_map = {
     "Fishing": "Fishing Window Score",
-    "Bass Fishing": "Fishing Window Score",
-    "Trout Fishing": "Fishing Window Score",
-    "Walleye Fishing": "Fishing Window Score",
-    "Pike Fishing": "Fishing Window Score",
-    "Panfish Fishing": "Fishing Window Score",
     "Running": "Running Window Score",
     "Kayaking": "Kayaking Window Score",
     "Disc Golf": "Disc Golf Window Score",
+    "Tennis": "Tennis Window Score",
+    "Beach Day": "Beach Day Window Score",
     }
 
     if selected_activity not in window_column_map:
@@ -4207,6 +4638,43 @@ if len(best_targets) > 0:
         mime="text/csv",
     )
 
+    with st.expander("View baseline hobby rules", expanded=False):
+        baseline_rules = load_baseline_hobby_rules()
+
+        if len(baseline_rules) == 0:
+            st.info("No baseline hobby rules found.")
+        else:
+            selected_rule_hobby = st.selectbox(
+                "Choose hobby rules to view",
+                options=sorted(baseline_rules["hobby"].dropna().unique()),
+                key="baseline_rules_hobby_select",
+            )
+
+            hobby_rules = get_rules_for_hobby(
+                baseline_rules,
+                selected_rule_hobby,
+            )
+
+            st.dataframe(
+                hobby_rules[
+                    [
+                        "hobby",
+                        "factor",
+                        "direction",
+                        "ideal_low",
+                        "ideal_high",
+                        "okay_low",
+                        "okay_high",
+                        "bad_low",
+                        "bad_high",
+                        "weight",
+                        "confidence",
+                        "notes",
+                    ]
+                ],
+                width="stretch",
+            )
+
 with weekend_tab:
     st.header("Weekend Planner")
 
@@ -4662,13 +5130,13 @@ with log_tab:
         fish_activity = "Not applicable"
         visibility_light = "Not applicable"
 
-        if selected_activity in ["Camping", "Running", "Disc Golf"]:
+        if selected_activity in ["Camping", "Running", "Disc Golf", "Tennis"]:
             actual_ground_wetness = st.selectbox(
                 "Actual ground/course/trail condition",
                 options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
             )
 
-        if selected_activity in FISHING_ACTIVITIES + ["Kayaking"]:
+        if selected_activity in FISHING_ACTIVITIES + ["Kayaking", "Beach Day"]:
             actual_water_conditions = st.selectbox(
                 "Actual water conditions",
                 options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
