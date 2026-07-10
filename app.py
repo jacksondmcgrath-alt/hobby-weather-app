@@ -19,6 +19,7 @@ from supabase import create_client
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 LOG_FILE = "activity_log.csv"
 SETTINGS_FILE = "preferences.json"
@@ -182,6 +183,17 @@ def load_scenario_ratings():
         "model_features_version",
         "scenario_fingerprint",
         "shown_features",
+        "hidden_features",
+        "scenario_mode",
+        "scenario_generation_method",
+        "rating_question",
+        "rating_scale_min",
+        "rating_scale_max",
+        "rating_target",
+        "rater_confidence",
+        "rater_experience_level",
+        "assume_safe_conditions",
+        "required_context_missing",
     ]
 
     try:
@@ -375,7 +387,7 @@ def save_scenario_rating(
         "rating_0_to_100": float(rating) * 10,
         "notes": notes,
         "scenario_json": clean_json_value(scenario),
-        "source": "random_scenario_v1",
+        "source": scenario.get("scenario_generation_method", "random_scenario_v1"),
 
         # Core feature columns
         "temperature": scenario.get("temperature"),
@@ -401,7 +413,7 @@ def save_scenario_rating(
 
         # Metadata for correct ML interpretation
         "scenario_mode": scenario_mode,
-        "scenario_generation_method": "random_scenario_v1",
+        "scenario_generation_method": scenario.get("scenario_generation_method", "random_scenario_v1"),
         "model_features_version": scenario.get("model_features_version", "scenario_v1"),
         "rating_question": "How good does this scenario sound?",
         "rating_scale_min": 1,
@@ -1113,6 +1125,197 @@ def get_hidden_features_for_scenario(scenario, shown_features):
 
     return hidden_features
 
+def choose_historical_date(days_back_min=14, days_back_max=365):
+    """
+    Picks a random historical date.
+
+    Starts at least 14 days back because archive data may lag slightly.
+    """
+
+    days_back = random.randint(days_back_min, days_back_max)
+
+    historical_date = (
+        pd.Timestamp.today()
+        - pd.Timedelta(days=days_back)
+    ).date()
+
+    return historical_date.strftime("%Y-%m-%d")
+
+
+def activity_hour_filter(activity, df):
+    """
+    Keeps realistic hours for the selected activity.
+    """
+
+    working_df = df.copy()
+    working_df["hour"] = working_df["time"].dt.hour
+
+    if activity == "Running":
+        return working_df[
+            (working_df["hour"] >= 6) &
+            (working_df["hour"] <= 20)
+        ]
+
+    if activity in ["Fishing"]:
+        return working_df[
+            (working_df["hour"] >= 5) &
+            (working_df["hour"] <= 22)
+        ]
+
+    if activity in ["Kayaking", "Beach Day", "Tennis", "Disc Golf"]:
+        return working_df[
+            (working_df["hour"] >= 8) &
+            (working_df["hour"] <= 20)
+        ]
+
+    if activity == "Camping":
+        return working_df[
+            (working_df["hour"] >= 10) &
+            (working_df["hour"] <= 18)
+        ]
+
+    return working_df[
+        (working_df["hour"] >= 8) &
+        (working_df["hour"] <= 20)
+    ]
+
+
+def estimate_historical_bug_index(temp, humidity, wind, rain):
+    """
+    Estimates bug activity for a historical scenario.
+    """
+
+    score = 0
+
+    if temp < 50:
+        score += 10
+    elif temp < 60:
+        score += 25
+    elif temp <= 75:
+        score += 50
+    elif temp <= 88:
+        score += 65
+    else:
+        score += 45
+
+    if humidity >= 80:
+        score += 20
+    elif humidity >= 65:
+        score += 12
+    elif humidity >= 50:
+        score += 5
+
+    if wind < 4:
+        score += 15
+    elif wind < 8:
+        score += 8
+    elif wind > 15:
+        score -= 10
+
+    if rain >= 0.05:
+        score += 6
+
+    return clamp_score(score)
+
+
+def historical_row_to_scenario(activity, historical_row):
+    """
+    Converts one historical hourly weather row into a scenario.
+    """
+
+    temp = historical_row.get("temperature_2m")
+    humidity = historical_row.get("relative_humidity_2m")
+    dew_point = historical_row.get("dew_point_2m")
+    rain_amount = historical_row.get("precipitation")
+    cloud_cover = historical_row.get("cloud_cover")
+    wind_speed = historical_row.get("wind_speed_10m")
+    wind_gust = historical_row.get("wind_gusts_10m")
+    wind_direction = historical_row.get("wind_direction_10m")
+    pressure = historical_row.get("pressure_msl")
+
+    if pd.isna(rain_amount):
+        rain_amount = 0
+
+    bug_index = estimate_historical_bug_index(
+        temp=temp if pd.notna(temp) else 60,
+        humidity=humidity if pd.notna(humidity) else 60,
+        wind=wind_speed if pd.notna(wind_speed) else 5,
+        rain=rain_amount,
+    )
+
+    month = pd.to_datetime(historical_row["time"]).month
+
+    advanced_features = generate_advanced_scenario_features()
+
+    advanced_features.update({
+        "visibility": None,
+        "wind_direction": None if pd.isna(wind_direction) else float(wind_direction),
+        "rain_amount": None if pd.isna(rain_amount) else float(rain_amount),
+        "month": month,
+        "season": season_from_month(month),
+    })
+
+    scenario = {
+        "activity": activity,
+        "temperature": None if pd.isna(temp) else round(float(temp), 1),
+        "wind_speed": None if pd.isna(wind_speed) else round(float(wind_speed), 1),
+        "wind_gust": None if pd.isna(wind_gust) else round(float(wind_gust), 1),
+        "rain_chance": None,
+        "humidity": None if pd.isna(humidity) else round(float(humidity)),
+        "cloud_cover": None if pd.isna(cloud_cover) else round(float(cloud_cover)),
+        "pressure_change": 0,
+        "bug_index": round(bug_index),
+        "water_temp": None,
+        "storm_safety": 90,
+        "dew_point": None if pd.isna(dew_point) else round(float(dew_point), 1),
+        "aqi": None,
+        "uv_index": None,
+    }
+
+    for key, value in advanced_features.items():
+        scenario[key] = value
+
+    scenario["advanced_features"] = advanced_features
+    scenario["location_context"] = build_location_context_for_scenario()
+    scenario["model_features_version"] = "historical_scenario_v1"
+    scenario["historical_time"] = str(historical_row["time"])
+
+    return scenario
+
+
+def generate_historical_scenario(activity, latitude, longitude):
+    """
+    Generates a scenario from real historical weather.
+    """
+
+    historical_date = choose_historical_date()
+
+    historical_weather = fetch_historical_weather(
+        latitude=latitude,
+        longitude=longitude,
+        start_date=historical_date,
+        end_date=historical_date,
+    )
+
+    filtered_weather = activity_hour_filter(
+        activity,
+        historical_weather,
+    )
+
+    if len(filtered_weather) == 0:
+        filtered_weather = historical_weather
+
+    selected_row = filtered_weather.sample(1).iloc[0]
+
+    scenario = historical_row_to_scenario(
+        activity,
+        selected_row,
+    )
+
+    scenario["scenario_generation_method"] = "historical_weather_v1"
+    scenario["historical_date"] = historical_date
+
+    return scenario
 
 def get_required_context_missing(activity, scenario):
     """
@@ -1145,6 +1348,123 @@ def get_required_context_missing(activity, scenario):
             missing.append("overnight_low")
 
     return missing
+
+def prepare_scenario_ratings_for_insights(scenario_ratings):
+    """
+    Cleans scenario ratings for insight reporting.
+    """
+
+    df = scenario_ratings.copy()
+
+    numeric_columns = [
+        "rating",
+        "rating_0_to_100",
+        "rater_confidence",
+        "temperature",
+        "wind_speed",
+        "wind_gust",
+        "rain_chance",
+        "humidity",
+        "cloud_cover",
+        "pressure_change",
+        "bug_index",
+        "water_temp",
+        "storm_safety",
+        "dew_point",
+        "aqi",
+        "uv_index",
+    ]
+
+    for column in numeric_columns:
+        if column in df.columns:
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce",
+            )
+
+    if "created_at" in df.columns:
+        df["created_at"] = pd.to_datetime(
+            df["created_at"],
+            errors="coerce",
+        )
+
+    return df
+
+
+def build_scenario_activity_summary(scenario_ratings):
+    """
+    Builds summary stats by activity.
+    Handles missing rater_confidence safely.
+    """
+
+    df = prepare_scenario_ratings_for_insights(scenario_ratings)
+
+    if len(df) == 0:
+        return pd.DataFrame()
+
+    if "rater_confidence" not in df.columns:
+        df["rater_confidence"] = pd.NA
+
+    summary = (
+        df
+        .groupby("activity", as_index=False)
+        .agg(
+            ratings=("rating", "count"),
+            average_rating=("rating", "mean"),
+            median_rating=("rating", "median"),
+            average_confidence=("rater_confidence", "mean"),
+        )
+    )
+
+    summary["average_rating"] = summary["average_rating"].round(1)
+    summary["median_rating"] = summary["median_rating"].round(1)
+    summary["average_confidence"] = summary["average_confidence"].round(1)
+
+    summary = summary.sort_values(
+        ["ratings", "average_rating"],
+        ascending=[False, False],
+    )
+
+    return summary
+
+
+def describe_scenario_row(row):
+    """
+    Creates a short readable scenario description.
+    """
+
+    parts = []
+
+    field_labels = {
+        "temperature": "temp",
+        "wind_speed": "wind",
+        "wind_gust": "gust",
+        "rain_chance": "rain",
+        "humidity": "humidity",
+        "cloud_cover": "clouds",
+        "pressure_change": "pressure Δ",
+        "bug_index": "bugs",
+        "water_temp": "water",
+        "storm_safety": "storm safety",
+        "dew_point": "dew point",
+        "aqi": "AQI",
+        "uv_index": "UV",
+    }
+
+    for field, label in field_labels.items():
+        if field in row and pd.notna(row[field]):
+            value = row[field]
+
+            if field in ["temperature", "water_temp", "dew_point"]:
+                parts.append(f"{label} {value:.0f}°F")
+            elif field in ["wind_speed", "wind_gust"]:
+                parts.append(f"{label} {value:.0f} mph")
+            elif field == "rain_chance":
+                parts.append(f"{label} {value:.0f}%")
+            else:
+                parts.append(f"{label} {value:.0f}")
+
+    return ", ".join(parts)
 
 def get_rule_number(rule, column_name, default=None):
     """
@@ -2144,6 +2464,49 @@ def dashboard_warning_text(row):
 # =========================
 # Weather fetching
 # =========================
+
+@st.cache_data(ttl=86400)
+def fetch_historical_weather(latitude, longitude, start_date, end_date):
+    """
+    Fetches historical hourly weather from Open-Meteo Archive API.
+    """
+
+    hourly_variables = [
+        "temperature_2m",
+        "relative_humidity_2m",
+        "dew_point_2m",
+        "precipitation",
+        "rain",
+        "cloud_cover",
+        "wind_speed_10m",
+        "wind_gusts_10m",
+        "wind_direction_10m",
+        "pressure_msl",
+    ]
+
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "start_date": start_date,
+        "end_date": end_date,
+        "hourly": ",".join(hourly_variables),
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+        "precipitation_unit": "inch",
+        "timezone": "auto",
+    }
+
+    data = get_json_with_retries(
+        ARCHIVE_URL,
+        params=params,
+        timeout=15,
+        retries=2,
+    )
+
+    df = pd.DataFrame(data["hourly"])
+    df["time"] = pd.to_datetime(df["time"])
+
+    return df
 
 @st.cache_data(ttl=7200)
 def fetch_weather_forecast(latitude, longitude, days):
@@ -5271,24 +5634,58 @@ with scenario_tab:
             options=available_scenario_activities,
             key="scenario_activity_select",
         )
+        scenario_source = st.radio(
+            "Scenario source",
+            options=["Random synthetic", "Historical weather"],
+            horizontal=True,
+            key="scenario_source_select",
+        )
 
-        if (
+        scenario_state_changed = (
             "current_scenario" not in st.session_state
             or st.session_state.get("current_scenario_activity") != selected_scenario_activity
-        ):
-            st.session_state["current_scenario"] = generate_random_scenario(
-                selected_scenario_activity
-            )
-            st.session_state["current_scenario_activity"] = selected_scenario_activity
+            or st.session_state.get("current_scenario_source") != scenario_source
+        )
 
-        if st.button("Generate new scenario"):
-            st.session_state["current_scenario"] = generate_random_scenario(
-                selected_scenario_activity
-            )
+        if scenario_state_changed:
+            if scenario_source == "Historical weather":
+                st.session_state["current_scenario"] = generate_historical_scenario(
+                    selected_scenario_activity,
+                    latitude,
+                    longitude,
+                )
+            else:
+                st.session_state["current_scenario"] = generate_random_scenario(
+                    selected_scenario_activity
+                )
+
             st.session_state["current_scenario_activity"] = selected_scenario_activity
+            st.session_state["current_scenario_source"] = scenario_source
+        if st.button("Generate new scenario"):
+            if scenario_source == "Historical weather":
+                st.session_state["current_scenario"] = generate_historical_scenario(
+                    selected_scenario_activity,
+                    latitude,
+                    longitude,
+                )
+            else:
+                st.session_state["current_scenario"] = generate_random_scenario(
+                    selected_scenario_activity
+                )
+
+            st.session_state["current_scenario_activity"] = selected_scenario_activity
+            st.session_state["current_scenario_source"] = scenario_source
             st.rerun()
 
         scenario = st.session_state["current_scenario"]
+
+        if scenario.get("scenario_generation_method") == "historical_weather_v1":
+            st.caption(
+                f"Historical weather scenario from {scenario.get('historical_date', 'unknown date')} "
+                f"at {scenario.get('historical_time', 'unknown time')}."
+            )
+        else:
+            st.caption("Random synthetic scenario.")
 
         st.subheader(f"Scenario: {activity_label(selected_scenario_activity)}")
 
@@ -5456,7 +5853,7 @@ with scenario_tab:
 
         st.markdown("---")
 
-        st.subheader("Scenario Rating Dataset")
+        st.subheader("Scenario Insights")
 
         scenario_ratings = load_scenario_ratings()
 
@@ -5466,64 +5863,217 @@ with scenario_tab:
                 keep="first",
             ).reset_index(drop=True)
 
-        elif "scenario_fingerprint" in scenario_ratings.columns:
-            scenario_ratings = scenario_ratings.drop_duplicates(
-                subset=["scenario_fingerprint"],
-                keep="first",
-            ).reset_index(drop=True)
-
-        else:
-            scenario_ratings = scenario_ratings.drop_duplicates(
-                subset=[
-                    "activity",
-                    "rating",
-                    "notes",
-                    "temperature",
-                    "wind_speed",
-                    "rain_chance",
-                    "water_temp",
-                    "storm_safety",
-                ],
-                keep="first",
-            ).reset_index(drop=True)
-
         if len(scenario_ratings) == 0:
             st.info("No scenario ratings saved yet.")
 
         else:
-            st.metric(
-                "Total scenario ratings",
-                len(scenario_ratings),
-            )
-
-            rating_summary = (
+            scenario_ratings_clean = prepare_scenario_ratings_for_insights(
                 scenario_ratings
-                .groupby("activity", as_index=False)
-                .agg(
-                    ratings=("rating", "count"),
-                    average_rating=("rating", "mean"),
+            )
+
+            # -------------------------
+            # Filters
+            # -------------------------
+
+            with st.expander("Filter scenario insights", expanded=False):
+                activity_filter_options = ["All"] + sorted(
+                    scenario_ratings_clean["activity"]
+                    .dropna()
+                    .unique()
+                    .tolist()
                 )
-            )
 
-            rating_summary["average_rating"] = rating_summary["average_rating"].round(1)
+                selected_activity_filter = st.selectbox(
+                    "Activity",
+                    options=activity_filter_options,
+                    key="scenario_insights_activity_filter",
+                )
 
-            st.dataframe(
-                rating_summary,
-                width="stretch",
-            )
+                min_rating_filter = st.slider(
+                    "Minimum rating",
+                    min_value=1,
+                    max_value=10,
+                    value=1,
+                    key="scenario_insights_min_rating",
+                )
 
-            with st.expander("View raw scenario ratings", expanded=False):
+                if "rater_confidence" in scenario_ratings_clean.columns:
+                    min_confidence_filter = st.slider(
+                        "Minimum rater confidence",
+                        min_value=1,
+                        max_value=10,
+                        value=1,
+                        key="scenario_insights_min_confidence",
+                    )
+                else:
+                    min_confidence_filter = 1
+
+                if "rater_experience_level" in scenario_ratings_clean.columns:
+                    experience_options = ["All"] + sorted(
+                        scenario_ratings_clean["rater_experience_level"]
+                        .dropna()
+                        .unique()
+                        .tolist()
+                    )
+
+                    selected_experience_filter = st.selectbox(
+                        "Experience level",
+                        options=experience_options,
+                        key="scenario_insights_experience_filter",
+                    )
+                else:
+                    selected_experience_filter = "All"
+
+            filtered_scenarios = scenario_ratings_clean.copy()
+
+            if selected_activity_filter != "All":
+                filtered_scenarios = filtered_scenarios[
+                    filtered_scenarios["activity"] == selected_activity_filter
+                ]
+
+            filtered_scenarios = filtered_scenarios[
+                filtered_scenarios["rating"] >= min_rating_filter
+            ]
+
+            if "rater_confidence" in filtered_scenarios.columns:
+                filtered_scenarios = filtered_scenarios[
+                    filtered_scenarios["rater_confidence"].fillna(0) >= min_confidence_filter
+                ]
+
+            if (
+                selected_experience_filter != "All"
+                and "rater_experience_level" in filtered_scenarios.columns
+            ):
+                filtered_scenarios = filtered_scenarios[
+                    filtered_scenarios["rater_experience_level"] == selected_experience_filter
+                ]
+
+            # -------------------------
+            # Top-level metrics
+            # -------------------------
+
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+            with metric_col1:
+                st.metric(
+                    "Total ratings",
+                    len(filtered_scenarios),
+                )
+
+            with metric_col2:
+                if len(filtered_scenarios) > 0:
+                    st.metric(
+                        "Average rating",
+                        round(filtered_scenarios["rating"].mean(), 1),
+                    )
+                else:
+                    st.metric("Average rating", "N/A")
+
+            with metric_col3:
+                if (
+                    "rater_confidence" in filtered_scenarios.columns
+                    and len(filtered_scenarios) > 0
+                ):
+                    st.metric(
+                        "Average confidence",
+                        round(filtered_scenarios["rater_confidence"].mean(), 1),
+                    )
+                else:
+                    st.metric("Average confidence", "N/A")
+
+            if len(filtered_scenarios) == 0:
+                st.info("No scenario ratings match the selected filters.")
+
+            else:
+                # -------------------------
+                # Activity summary
+                # -------------------------
+
+                st.write("### Ratings by Activity")
+
+                rating_summary = build_scenario_activity_summary(
+                    filtered_scenarios
+                )
+
                 st.dataframe(
-                    scenario_ratings,
+                    rating_summary,
                     width="stretch",
                 )
 
-            st.download_button(
-                label="Download scenario ratings CSV",
-                data=scenario_ratings.to_csv(index=False),
-                file_name="scenario_ratings.csv",
-                mime="text/csv",
-            )
+                st.bar_chart(
+                    rating_summary.set_index("activity")["average_rating"]
+                )
+
+                # -------------------------
+                # Highest and lowest rated scenarios
+                # -------------------------
+
+                st.write("### Highest-Rated Scenarios")
+
+                top_scenarios = filtered_scenarios.sort_values(
+                    "rating",
+                    ascending=False,
+                ).head(5)
+
+                top_display_rows = []
+
+                for _, scenario_row in top_scenarios.iterrows():
+                    top_display_rows.append(
+                        {
+                            "Activity": scenario_row.get("activity"),
+                            "Rating": scenario_row.get("rating"),
+                            "Confidence": scenario_row.get("rater_confidence"),
+                            "Scenario": describe_scenario_row(scenario_row),
+                            "Notes": scenario_row.get("notes"),
+                        }
+                    )
+
+                st.dataframe(
+                    pd.DataFrame(top_display_rows),
+                    width="stretch",
+                )
+
+                st.write("### Lowest-Rated Scenarios")
+
+                low_scenarios = filtered_scenarios.sort_values(
+                    "rating",
+                    ascending=True,
+                ).head(5)
+
+                low_display_rows = []
+
+                for _, scenario_row in low_scenarios.iterrows():
+                    low_display_rows.append(
+                        {
+                            "Activity": scenario_row.get("activity"),
+                            "Rating": scenario_row.get("rating"),
+                            "Confidence": scenario_row.get("rater_confidence"),
+                            "Scenario": describe_scenario_row(scenario_row),
+                            "Notes": scenario_row.get("notes"),
+                        }
+                    )
+
+                st.dataframe(
+                    pd.DataFrame(low_display_rows),
+                    width="stretch",
+                )
+
+                # -------------------------
+                # Raw data
+                # -------------------------
+
+                with st.expander("View raw scenario ratings", expanded=False):
+                    st.dataframe(
+                        filtered_scenarios,
+                        width="stretch",
+                    )
+
+                st.download_button(
+                    label="Download filtered scenario ratings CSV",
+                    data=filtered_scenarios.to_csv(index=False),
+                    file_name="scenario_ratings_filtered.csv",
+                    mime="text/csv",
+                )
 
 with forecast_tab:
     st.header("Predicted Scores")
