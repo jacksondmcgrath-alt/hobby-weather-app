@@ -224,6 +224,60 @@ def load_scenario_ratings():
         st.warning("Could not load scenario ratings.")
         st.write(e)
         return pd.DataFrame(columns=columns)
+    
+def update_scenario_rating(rating_id, updated_data):
+    """
+    Updates one scenario rating in Supabase.
+    """
+
+    supabase = get_supabase_client()
+
+    clean_update = {
+        "rating": float(updated_data["rating"]),
+        "rating_0_to_100": float(updated_data["rating"]) * 10,
+        "notes": updated_data.get("notes", ""),
+        "rater_confidence": (
+            None
+            if updated_data.get("rater_confidence") is None
+            else float(updated_data.get("rater_confidence"))
+        ),
+        "rater_experience_level": updated_data.get("rater_experience_level"),
+        "assume_safe_conditions": updated_data.get("assume_safe_conditions"),
+    }
+
+    clean_update = clean_json_value(clean_update)
+
+    response = (
+        supabase
+        .table("scenario_ratings")
+        .update(clean_update)
+        .eq("id", rating_id)
+        .execute()
+    )
+
+    load_scenario_ratings.clear()
+
+    return response
+
+
+def delete_scenario_rating(rating_id):
+    """
+    Deletes one scenario rating from Supabase.
+    """
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase
+        .table("scenario_ratings")
+        .delete()
+        .eq("id", rating_id)
+        .execute()
+    )
+
+    load_scenario_ratings.clear()
+
+    return response
 
 def get_shown_features_for_scenario(activity, scenario_mode="basic"):
     """
@@ -966,6 +1020,43 @@ def season_from_month(month):
 
     return "Unknown"
 
+def build_scenario_progress_table(scenario_ratings, goal_per_activity=25):
+    """
+    Builds progress toward scenario rating goals for each activity.
+    """
+
+    activity_list = sorted(ACTIVITY_SCENARIO_FIELDS.keys())
+
+    if scenario_ratings is None or len(scenario_ratings) == 0:
+        counts = pd.DataFrame(columns=["activity", "rating_count"])
+    else:
+        counts = (
+            scenario_ratings
+            .groupby("activity", as_index=False)
+            .agg(rating_count=("rating", "count"))
+        )
+
+    rows = []
+
+    for activity in activity_list:
+        matching = counts[counts["activity"] == activity]
+
+        if len(matching) > 0:
+            rating_count = int(matching.iloc[0]["rating_count"])
+        else:
+            rating_count = 0
+
+        progress = min(rating_count / goal_per_activity, 1)
+
+        rows.append({
+            "activity": activity,
+            "rating_count": rating_count,
+            "goal": goal_per_activity,
+            "remaining": max(goal_per_activity - rating_count, 0),
+            "progress": progress,
+        })
+
+    return pd.DataFrame(rows)
 
 def generate_advanced_scenario_features():
     """
@@ -6074,6 +6165,232 @@ with scenario_tab:
                     file_name="scenario_ratings_filtered.csv",
                     mime="text/csv",
                 )
+
+        st.subheader("Scenario Progress Goals")
+
+        goal_per_activity = st.number_input(
+            "Target ratings per activity",
+            min_value=5,
+            max_value=500,
+            value=25,
+            step=5,
+            help="A good first target is 25 ratings per activity.",
+            key="scenario_goal_per_activity",
+        )
+
+        progress_table = build_scenario_progress_table(
+            scenario_ratings,
+            goal_per_activity=goal_per_activity,
+        )
+
+        total_ratings = int(progress_table["rating_count"].sum())
+        total_goal = int(progress_table["goal"].sum())
+        total_progress = min(total_ratings / total_goal, 1) if total_goal > 0 else 0
+
+        st.write(f"Overall progress: **{total_ratings}/{total_goal} ratings**")
+        st.progress(total_progress)
+
+        for _, progress_row in progress_table.iterrows():
+            activity = progress_row["activity"]
+            rating_count = int(progress_row["rating_count"])
+            goal = int(progress_row["goal"])
+            remaining = int(progress_row["remaining"])
+            progress = float(progress_row["progress"])
+
+            st.write(
+                f"**{activity_label(activity)}:** "
+                f"{rating_count}/{goal} ratings "
+                f"({remaining} remaining)"
+            )
+
+            st.progress(progress)
+
+        with st.expander("View scenario progress table", expanded=False):
+            st.dataframe(
+                progress_table,
+                width="stretch",
+            )
+
+        st.markdown("---")
+
+        st.subheader("Manage Scenario Ratings")
+
+        scenario_manage_df = load_scenario_ratings()
+
+        if "id" in scenario_manage_df.columns:
+            scenario_manage_df = scenario_manage_df.drop_duplicates(
+                subset=["id"],
+                keep="first",
+            ).reset_index(drop=True)
+
+        if len(scenario_manage_df) == 0:
+            st.info("No scenario ratings available to manage.")
+
+        elif "id" not in scenario_manage_df.columns:
+            st.warning("Scenario rating IDs are not available.")
+
+        else:
+            scenario_manage_df["display_label"] = (
+                scenario_manage_df["id"].astype(str)
+                + " | "
+                + scenario_manage_df["activity"].astype(str)
+                + " | rating "
+                + scenario_manage_df["rating"].astype(str)
+                + " | "
+                + scenario_manage_df["notes"].fillna("").astype(str).str.slice(0, 40)
+            )
+
+            selected_scenario_label = st.selectbox(
+                "Choose a scenario rating to edit/delete",
+                options=scenario_manage_df["display_label"].tolist(),
+                key="manage_scenario_rating_selectbox",
+            )
+
+            selected_scenario = scenario_manage_df[
+                scenario_manage_df["display_label"] == selected_scenario_label
+            ].iloc[0]
+
+            selected_scenario_id = int(selected_scenario["id"])
+
+            st.write("Selected scenario rating:")
+
+            st.dataframe(
+                pd.DataFrame([selected_scenario.drop(labels=["display_label"])]),
+                width="stretch",
+            )
+
+            with st.expander("Edit scenario rating", expanded=True):
+                current_rating = selected_scenario.get("rating", 5)
+
+                try:
+                    current_rating = int(float(current_rating))
+                except Exception:
+                    current_rating = 5
+
+                edit_scenario_rating = st.slider(
+                    "Rating",
+                    min_value=1,
+                    max_value=10,
+                    value=current_rating,
+                    key=f"edit_scenario_rating_{selected_scenario_id}",
+                )
+
+                current_confidence = selected_scenario.get("rater_confidence", 7)
+
+                try:
+                    if pd.isna(current_confidence):
+                        current_confidence = 7
+                    current_confidence = int(float(current_confidence))
+                except Exception:
+                    current_confidence = 7
+
+                edit_rater_confidence = st.slider(
+                    "Rater confidence",
+                    min_value=1,
+                    max_value=10,
+                    value=current_confidence,
+                    key=f"edit_scenario_confidence_{selected_scenario_id}",
+                )
+
+                experience_options = [
+                    "Beginner",
+                    "Intermediate",
+                    "Advanced",
+                    "Expert",
+                    "Not sure",
+                ]
+
+                current_experience = selected_scenario.get(
+                    "rater_experience_level",
+                    "Not sure",
+                )
+
+                if pd.isna(current_experience) or current_experience not in experience_options:
+                    current_experience = "Not sure"
+
+                edit_experience_level = st.selectbox(
+                    "Experience level",
+                    options=experience_options,
+                    index=experience_options.index(current_experience),
+                    key=f"edit_scenario_experience_{selected_scenario_id}",
+                )
+
+                current_assume_safe = selected_scenario.get(
+                    "assume_safe_conditions",
+                    True,
+                )
+
+                if pd.isna(current_assume_safe):
+                    current_assume_safe = True
+
+                edit_assume_safe_conditions = st.checkbox(
+                    "Assume normal safety precautions are taken",
+                    value=bool(current_assume_safe),
+                    key=f"edit_scenario_assume_safe_{selected_scenario_id}",
+                )
+
+                current_notes = selected_scenario.get("notes", "")
+
+                if pd.isna(current_notes):
+                    current_notes = ""
+
+                edit_scenario_notes = st.text_area(
+                    "Notes",
+                    value=str(current_notes),
+                    key=f"edit_scenario_notes_{selected_scenario_id}",
+                )
+
+                if st.button(
+                    "Save scenario rating edits",
+                    key=f"save_scenario_edits_{selected_scenario_id}",
+                ):
+                    try:
+                        update_scenario_rating(
+                            selected_scenario_id,
+                            {
+                                "rating": edit_scenario_rating,
+                                "notes": edit_scenario_notes,
+                                "rater_confidence": edit_rater_confidence,
+                                "rater_experience_level": edit_experience_level,
+                                "assume_safe_conditions": edit_assume_safe_conditions,
+                            },
+                        )
+
+                        st.success("Scenario rating updated.")
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error("Could not update scenario rating.")
+                        st.write(type(e).__name__)
+                        st.write(e)
+
+            with st.expander("Danger zone: delete scenario rating", expanded=False):
+                st.warning("Deleting a scenario rating cannot be undone.")
+
+                confirm_delete_scenario = st.checkbox(
+                    "Yes, delete this scenario rating",
+                    key=f"confirm_delete_scenario_{selected_scenario_id}",
+                )
+
+                if st.button(
+                    "Delete scenario rating",
+                    key=f"delete_scenario_rating_{selected_scenario_id}",
+                ):
+                    if confirm_delete_scenario:
+                        try:
+                            delete_scenario_rating(selected_scenario_id)
+
+                            st.success("Scenario rating deleted.")
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error("Could not delete scenario rating.")
+                            st.write(type(e).__name__)
+                            st.write(e)
+
+                    else:
+                        st.warning("Check the confirmation box before deleting.")
+
 
 with forecast_tab:
     st.header("Predicted Scores")
