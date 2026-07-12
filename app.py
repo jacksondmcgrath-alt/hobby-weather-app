@@ -1096,6 +1096,10 @@ def load_saved_locations():
         "manual_water_temp",
         "notes",
         "use_usgs_water_data",
+        "water_body_size",
+        "wind_exposure",
+        "use_ndbc_data",
+        "ndbc_station_id",
         "usgs_site_id",
     ]
 
@@ -1145,6 +1149,10 @@ def save_saved_location(location_data):
         "use_usgs_water_data": bool(location_data.get("use_usgs_water_data", False)),
         "usgs_site_id": location_data.get("usgs_site_id", ""),
         "default_activities": location_data.get("default_activities", []),
+        "water_body_size": location_data.get("water_body_size", ""),
+        "wind_exposure": location_data.get("wind_exposure", ""),
+        "use_ndbc_data": bool(location_data.get("use_ndbc_data", False)),
+        "ndbc_station_id": location_data.get("ndbc_station_id", ""),
         "manual_water_temp": (
             None
             if location_data.get("manual_water_temp") in ["", None]
@@ -1181,6 +1189,10 @@ def update_saved_location(location_id, location_data):
         "default_activities": location_data.get("default_activities", []),
         "use_usgs_water_data": bool(location_data.get("use_usgs_water_data", False)),
         "usgs_site_id": location_data.get("usgs_site_id", ""),
+        "water_body_size": location_data.get("water_body_size", ""),
+        "wind_exposure": location_data.get("wind_exposure", ""),
+        "use_ndbc_data": bool(location_data.get("use_ndbc_data", False)),
+        "ndbc_station_id": location_data.get("ndbc_station_id", ""),
         "manual_water_temp": (
             None
             if location_data.get("manual_water_temp") in ["", None]
@@ -1340,7 +1352,13 @@ def build_location_context_from_location(location):
         "longitude": location.get("longitude"),
         "location_type": location.get("location_type"),
         "water_type": location.get("water_type"),
+        "water_body_size": location.get("water_body_size"),
+        "wind_exposure": location.get("wind_exposure"),
         "manual_water_temp": location.get("manual_water_temp"),
+        "use_usgs_water_data": location.get("use_usgs_water_data"),
+        "usgs_site_id": location.get("usgs_site_id"),
+        "use_ndbc_data": location.get("use_ndbc_data"),
+        "ndbc_station_id": location.get("ndbc_station_id"),
         "notes": location.get("notes"),
     })
 
@@ -1969,6 +1987,105 @@ def season_from_month(month):
         return "Fall"
 
     return "Unknown"
+
+def estimate_inland_water_chop(wind_speed, wind_gust, water_body_size, wind_exposure):
+    """
+    Estimates chop/roughness for inland ponds and lakes.
+
+    Returns:
+    - score 0-100, higher = calmer/better
+    - label
+    """
+
+    try:
+        wind_speed = float(wind_speed)
+    except Exception:
+        wind_speed = 0
+
+    try:
+        wind_gust = float(wind_gust)
+    except Exception:
+        wind_gust = wind_speed
+
+    exposure_multiplier = {
+        "Sheltered": 0.75,
+        "Moderate": 1.0,
+        "Open/exposed": 1.3,
+        "Unknown": 1.0,
+        "Not applicable": 1.0,
+    }.get(wind_exposure, 1.0)
+
+    size_multiplier = {
+        "Pond": 0.75,
+        "Small lake": 0.9,
+        "Medium lake": 1.0,
+        "Large lake": 1.25,
+        "Great Lake": 1.6,
+        "River": 0.9,
+        "Unknown": 1.0,
+        "Not applicable": 1.0,
+    }.get(water_body_size, 1.0)
+
+    effective_wind = max(wind_speed, wind_gust * 0.7)
+    effective_wind = effective_wind * exposure_multiplier * size_multiplier
+
+    if effective_wind < 8:
+        return 95, "Calm/light chop"
+
+    if effective_wind < 13:
+        return 75, "Light to moderate chop"
+
+    if effective_wind < 18:
+        return 50, "Choppy"
+
+    if effective_wind < 25:
+        return 25, "Rough for paddling"
+
+    return 5, "Potentially unsafe rough water"
+
+def get_location_chop_summary(location, wind_speed, wind_gust):
+    """
+    Gets inland water chop summary for a saved location.
+    """
+
+    if location is None:
+        return None
+
+    water_body_size = location.get("water_body_size", "Unknown")
+    wind_exposure = location.get("wind_exposure", "Unknown")
+
+    if water_body_size in [None, "", "Not applicable"]:
+        return None
+
+    chop_score, chop_label = estimate_inland_water_chop(
+        wind_speed=wind_speed,
+        wind_gust=wind_gust,
+        water_body_size=water_body_size,
+        wind_exposure=wind_exposure,
+    )
+
+    return {
+        "chop_score": chop_score,
+        "chop_label": chop_label,
+        "water_body_size": water_body_size,
+        "wind_exposure": wind_exposure,
+    }
+
+
+def format_chop_summary(chop_summary):
+    """
+    Formats chop summary for display.
+    """
+
+    if not chop_summary:
+        return None
+
+    return (
+        f"{chop_summary['chop_label']} "
+        f"(score {chop_summary['chop_score']}, "
+        f"{chop_summary['water_body_size']}, "
+        f"{chop_summary['wind_exposure']})"
+    )
 
 def build_scenario_progress_table(scenario_ratings, goal_per_activity=25):
     """
@@ -3316,6 +3433,26 @@ PLAN_STATUSES = [
     "Maybe",
     "Completed",
     "Canceled",
+]
+
+WATER_BODY_SIZE_OPTIONS = [
+    "Not applicable",
+    "Pond",
+    "Small lake",
+    "Medium lake",
+    "Large lake",
+    "Great Lake",
+    "River",
+    "Unknown",
+]
+
+
+WIND_EXPOSURE_OPTIONS = [
+    "Not applicable",
+    "Sheltered",
+    "Moderate",
+    "Open/exposed",
+    "Unknown",
 ]
 
 def activity_label(activity):
@@ -7436,6 +7573,14 @@ with home_tab:
 
             home_nws_alerts = get_nws_alerts_for_location(home_default_location)
 
+            home_chop_summary = get_location_chop_summary(
+                location=home_default_location,
+                wind_speed=top_pick.get("wind_max", 0),
+                wind_gust=top_pick.get("gust_max", top_pick.get("wind_max", 0)),
+            )
+
+            home_chop_summary_text = format_chop_summary(home_chop_summary)
+
             if home_default_location is not None:
                 home_location_name = home_default_location.get("name", "")
             else:
@@ -7481,6 +7626,9 @@ with home_tab:
 
                 if home_usgs_water_summary:
                     st.write(f"**Water data:** {home_usgs_water_summary}")
+
+                if home_chop_summary_text and top_pick["activity"] in ["Fishing", "Kayaking", "Beach Day"]:
+                    st.write(f"**Water chop estimate:** {home_chop_summary_text}")
 
                 if len(home_nws_alerts) > 0:
                     st.warning("Active weather alerts for this location:")
@@ -7815,6 +7963,14 @@ with planner_tab:
 
                 nws_alerts = get_nws_alerts_for_location(default_location)
 
+                chop_summary = get_location_chop_summary(
+                    location=default_location,
+                    wind_speed=row.get("wind_max", 0),
+                    wind_gust=row.get("gust_max", row.get("wind_max", 0)),
+                )
+
+                chop_summary_text = format_chop_summary(chop_summary)
+
                 with st.container(border=True):
                     card_col1, card_col2 = st.columns([2, 1])
 
@@ -7838,6 +7994,9 @@ with planner_tab:
 
                         if usgs_water_summary:
                             st.write(f"**Water data:** {usgs_water_summary}")
+
+                        if chop_summary_text and row["activity"] in ["Fishing", "Kayaking", "Beach Day"]:
+                            st.write(f"**Water chop estimate:** {chop_summary_text}")
 
                         if len(nws_alerts) > 0:
                             st.warning("Active weather alerts for this location:")
@@ -7904,6 +8063,9 @@ with planner_tab:
                             if usgs_water_summary:
                                 calendar_description += f"\nWater data: {usgs_water_summary}"
                             
+                            if chop_summary_text:
+                                calendar_description += f"\nWater chop estimate: {chop_summary_text}"
+
                             if len(nws_alerts) > 0:
                                 calendar_description += "\n\nActive alerts:\n"
 
@@ -8988,6 +9150,18 @@ with manage_tab:
                 options=water_type_options,
             )
 
+            new_water_body_size = st.selectbox(
+                "Water body size",
+                options=WATER_BODY_SIZE_OPTIONS,
+                help="Used to estimate chop/roughness for ponds and lakes.",
+            )
+
+            new_wind_exposure = st.selectbox(
+                "Wind exposure",
+                options=WIND_EXPOSURE_OPTIONS,
+                help="Sheltered water is less affected by wind than open/exposed water.",
+            )
+
             use_usgs_water_data = st.checkbox(
                 "Use USGS water data for this location",
                 value=False,
@@ -8998,6 +9172,17 @@ with manage_tab:
                 "USGS site ID",
                 placeholder="Example: 04174500",
                 help="Find site IDs at waterdata.usgs.gov. Leave blank if not using USGS.",
+            )
+
+            use_ndbc_data = st.checkbox(
+                "Use NOAA buoy data for this location later",
+                value=False,
+                help="For future Great Lakes/coastal buoy data. Not used yet.",
+            )
+
+            ndbc_station_id = st.text_input(
+                "NOAA/NDBC buoy station ID",
+                placeholder="Optional, for future Great Lakes buoy data",
             )
 
             activity_options = sorted(predictions["activity"].unique())
@@ -9044,6 +9229,10 @@ with manage_tab:
                         "use_usgs_water_data": use_usgs_water_data,
                         "usgs_site_id": usgs_site_id,
                         "notes": new_location_notes,
+                        "water_body_size": new_water_body_size,
+                        "wind_exposure": new_wind_exposure,
+                        "use_ndbc_data": use_ndbc_data,
+                        "ndbc_station_id": ndbc_station_id,
                     })
 
                     st.success("Location saved.")
@@ -9123,6 +9312,30 @@ with manage_tab:
                     key=f"edit_water_type_{selected_location_id}",
                 )
 
+                current_water_body_size = selected_location.get("water_body_size", "Unknown")
+
+                if pd.isna(current_water_body_size) or current_water_body_size not in WATER_BODY_SIZE_OPTIONS:
+                    current_water_body_size = "Unknown"
+
+                edit_water_body_size = st.selectbox(
+                    "Water body size",
+                    options=WATER_BODY_SIZE_OPTIONS,
+                    index=WATER_BODY_SIZE_OPTIONS.index(current_water_body_size),
+                    key=f"edit_water_body_size_{selected_location_id}",
+                )
+
+                current_wind_exposure = selected_location.get("wind_exposure", "Unknown")
+
+                if pd.isna(current_wind_exposure) or current_wind_exposure not in WIND_EXPOSURE_OPTIONS:
+                    current_wind_exposure = "Unknown"
+
+                edit_wind_exposure = st.selectbox(
+                    "Wind exposure",
+                    options=WIND_EXPOSURE_OPTIONS,
+                    index=WIND_EXPOSURE_OPTIONS.index(current_wind_exposure),
+                    key=f"edit_wind_exposure_{selected_location_id}",
+                )
+
                 current_use_usgs = selected_location.get("use_usgs_water_data", False)
 
                 if pd.isna(current_use_usgs):
@@ -9144,6 +9357,29 @@ with manage_tab:
                     value=str(current_usgs_site_id),
                     placeholder="Example: 04174500",
                     key=f"edit_usgs_site_id_{selected_location_id}",
+                )
+
+                current_use_ndbc = selected_location.get("use_ndbc_data", False)
+
+                if pd.isna(current_use_ndbc):
+                    current_use_ndbc = False
+
+                edit_use_ndbc_data = st.checkbox(
+                    "Use NOAA buoy data for this location later",
+                    value=bool(current_use_ndbc),
+                    key=f"edit_use_ndbc_data_{selected_location_id}",
+                )
+
+                current_ndbc_station_id = selected_location.get("ndbc_station_id", "")
+
+                if pd.isna(current_ndbc_station_id):
+                    current_ndbc_station_id = ""
+
+                edit_ndbc_station_id = st.text_input(
+                    "NOAA/NDBC buoy station ID",
+                    value=str(current_ndbc_station_id),
+                    placeholder="Optional, for future Great Lakes buoy data",
+                    key=f"edit_ndbc_station_id_{selected_location_id}",
                 )
 
                 current_default_activities = selected_location.get("default_activities", [])
@@ -9201,6 +9437,10 @@ with manage_tab:
                             "use_usgs_water_data": edit_use_usgs_water_data,
                             "usgs_site_id": edit_usgs_site_id,
                             "notes": edit_notes,
+                            "water_body_size": edit_water_body_size,
+                            "wind_exposure": edit_wind_exposure,
+                            "use_ndbc_data": edit_use_ndbc_data,
+                            "ndbc_station_id": edit_ndbc_station_id,
                         },
                     )
 
