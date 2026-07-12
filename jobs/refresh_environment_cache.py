@@ -9,7 +9,7 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 NWS_ALERTS_URL = "https://api.weather.gov/alerts/active"
-
+USGS_IV_URL = "https://waterservices.usgs.gov/nwis/iv/"
 
 def get_supabase_client():
     """
@@ -32,7 +32,7 @@ def load_saved_locations(supabase):
     response = (
         supabase
         .table("saved_locations")
-        .select("id,name,latitude,longitude,location_type,water_type")
+        .select("id,name,latitude,longitude,location_type,water_type,use_usgs_water_data,usgs_site_id")
         .execute()
     )
 
@@ -132,6 +132,97 @@ def save_environment_cache(
         .execute()
     )
 
+def fetch_usgs_water_data(site_id):
+    """
+    Fetches USGS instantaneous water data.
+
+    Parameter codes:
+    00060 = discharge / streamflow, cubic feet per second
+    00065 = gauge height, feet
+    00010 = water temperature, Celsius
+    """
+
+    params = {
+        "format": "json",
+        "sites": site_id,
+        "parameterCd": "00060,00065,00010",
+        "siteStatus": "all",
+        "period": "P1D",
+    }
+
+    response = requests.get(
+        USGS_IV_URL,
+        params=params,
+        timeout=20,
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    result = {
+        "site_id": site_id,
+        "streamflow_cfs": None,
+        "gauge_height_ft": None,
+        "water_temp_c": None,
+        "water_temp_f": None,
+        "observations": [],
+    }
+
+    time_series = (
+        data
+        .get("value", {})
+        .get("timeSeries", [])
+    )
+
+    for series in time_series:
+        variable = series.get("variable", {})
+        variable_code_items = variable.get("variableCode", [])
+
+        if not variable_code_items:
+            continue
+
+        variable_code = variable_code_items[0].get("value")
+
+        values = series.get("values", [])
+
+        if not values:
+            continue
+
+        observations = values[0].get("value", [])
+
+        if not observations:
+            continue
+
+        latest = observations[-1]
+
+        raw_value = latest.get("value")
+        timestamp = latest.get("dateTime")
+
+        try:
+            numeric_value = float(raw_value)
+        except Exception:
+            numeric_value = None
+
+        result["observations"].append({
+            "parameter": variable_code,
+            "value": numeric_value,
+            "timestamp": timestamp,
+        })
+
+        if variable_code == "00060":
+            result["streamflow_cfs"] = numeric_value
+
+        elif variable_code == "00065":
+            result["gauge_height_ft"] = numeric_value
+
+        elif variable_code == "00010":
+            result["water_temp_c"] = numeric_value
+
+            if numeric_value is not None:
+                result["water_temp_f"] = round(numeric_value * 9 / 5 + 32, 1)
+
+    return result
 
 def main():
     """
@@ -173,6 +264,29 @@ def main():
 
         except Exception as error:
             print(f"Failed to refresh NWS alerts for {name}: {error}")
+
+        use_usgs = location.get("use_usgs_water_data")
+        usgs_site_id = location.get("usgs_site_id")
+
+        if use_usgs and usgs_site_id:
+            print(f"Refreshing USGS water data for {name}, site {usgs_site_id}...")
+
+            try:
+                usgs_data = fetch_usgs_water_data(usgs_site_id)
+
+                save_environment_cache(
+                    supabase=supabase,
+                    location_id=location_id,
+                    data_type="usgs_water",
+                    source="USGS",
+                    data_json=usgs_data,
+                    ttl_minutes=60,
+                )
+
+                print(f"Saved USGS water data for {name}.")
+
+            except Exception as error:
+                print(f"Failed to refresh USGS data for {name}: {error}")
 
     print("Environment cache refresh complete.")
 

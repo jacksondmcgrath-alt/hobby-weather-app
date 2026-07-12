@@ -971,6 +971,8 @@ def load_saved_locations():
         "default_activities",
         "manual_water_temp",
         "notes",
+        "use_usgs_water_data",
+        "usgs_site_id",
     ]
 
     try:
@@ -1016,6 +1018,8 @@ def save_saved_location(location_data):
         "longitude": float(location_data.get("longitude")),
         "location_type": location_data.get("location_type"),
         "water_type": location_data.get("water_type"),
+        "use_usgs_water_data": bool(location_data.get("use_usgs_water_data", False)),
+        "usgs_site_id": location_data.get("usgs_site_id", ""),
         "default_activities": location_data.get("default_activities", []),
         "manual_water_temp": (
             None
@@ -1051,6 +1055,8 @@ def update_saved_location(location_id, location_data):
         "location_type": location_data.get("location_type"),
         "water_type": location_data.get("water_type"),
         "default_activities": location_data.get("default_activities", []),
+        "use_usgs_water_data": bool(location_data.get("use_usgs_water_data", False)),
+        "usgs_site_id": location_data.get("usgs_site_id", ""),
         "manual_water_temp": (
             None
             if location_data.get("manual_water_temp") in ["", None]
@@ -8747,6 +8753,18 @@ with manage_tab:
                 options=water_type_options,
             )
 
+            use_usgs_water_data = st.checkbox(
+                "Use USGS water data for this location",
+                value=False,
+                help="Useful for river fishing/kayaking locations with a nearby USGS gauge.",
+            )
+
+            usgs_site_id = st.text_input(
+                "USGS site ID",
+                placeholder="Example: 04174500",
+                help="Find site IDs at waterdata.usgs.gov. Leave blank if not using USGS.",
+            )
+
             activity_options = sorted(predictions["activity"].unique())
 
             new_default_activities = st.multiselect(
@@ -8788,6 +8806,8 @@ with manage_tab:
                         "water_type": new_water_type,
                         "default_activities": new_default_activities,
                         "manual_water_temp": new_manual_water_temp,
+                        "use_usgs_water_data": use_usgs_water_data,
+                        "usgs_site_id": usgs_site_id,
                         "notes": new_location_notes,
                     })
 
@@ -8868,6 +8888,29 @@ with manage_tab:
                     key=f"edit_water_type_{selected_location_id}",
                 )
 
+                current_use_usgs = selected_location.get("use_usgs_water_data", False)
+
+                if pd.isna(current_use_usgs):
+                    current_use_usgs = False
+
+                edit_use_usgs_water_data = st.checkbox(
+                    "Use USGS water data for this location",
+                    value=bool(current_use_usgs),
+                    key=f"edit_use_usgs_water_data_{selected_location_id}",
+                )
+
+                current_usgs_site_id = selected_location.get("usgs_site_id", "")
+
+                if pd.isna(current_usgs_site_id):
+                    current_usgs_site_id = ""
+
+                edit_usgs_site_id = st.text_input(
+                    "USGS site ID",
+                    value=str(current_usgs_site_id),
+                    placeholder="Example: 04174500",
+                    key=f"edit_usgs_site_id_{selected_location_id}",
+                )
+
                 current_default_activities = selected_location.get("default_activities", [])
 
                 if not isinstance(current_default_activities, list):
@@ -8920,6 +8963,8 @@ with manage_tab:
                             "water_type": edit_water_type,
                             "default_activities": edit_default_activities,
                             "manual_water_temp": edit_manual_water_temp,
+                            "use_usgs_water_data": edit_use_usgs_water_data,
+                            "usgs_site_id": edit_usgs_site_id,
                             "notes": edit_notes,
                         },
                     )
