@@ -6,6 +6,7 @@ import math
 import re
 from datetime import datetime, timedelta
 from urllib import response
+from urllib.parse import urlparse, parse_qs, unquote
 
 import pandas as pd
 import requests
@@ -149,6 +150,183 @@ def geocode_place(place):
         })
 
     return results
+
+def extract_coordinates_from_text(text):
+    """
+    Attempts to extract latitude/longitude from plain text or map URLs.
+
+    Supports patterns like:
+    - 42.2808,-83.7430
+    - @42.2808,-83.7430
+    - ?q=42.2808,-83.7430
+    """
+
+    if text is None:
+        return None
+
+    text = str(text)
+
+    # Pattern for @lat,lon often found in Google Maps URLs
+    match = re.search(
+        r"@(-?\d+\.\d+),(-?\d+\.\d+)",
+        text,
+    )
+
+    if match:
+        return {
+            "latitude": float(match.group(1)),
+            "longitude": float(match.group(2)),
+            "label": "Coordinates from map link",
+        }
+
+    # Pattern for lat,lon anywhere in text
+    match = re.search(
+        r"(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)",
+        text,
+    )
+
+    if match:
+        latitude = float(match.group(1))
+        longitude = float(match.group(2))
+
+        if -90 <= latitude <= 90 and -180 <= longitude <= 180:
+            return {
+                "latitude": latitude,
+                "longitude": longitude,
+                "label": "Coordinates from text",
+            }
+
+    return None
+
+@st.cache_data(ttl=86400)
+def search_location_nominatim(query):
+    """
+    Searches for addresses/places using OpenStreetMap Nominatim.
+
+    Good for parks, addresses, landmarks, and many named places.
+    """
+
+    url = "https://nominatim.openstreetmap.org/search"
+
+    params = {
+        "q": query,
+        "format": "json",
+        "limit": 5,
+        "addressdetails": 1,
+    }
+
+    headers = {
+        "User-Agent": "hobby-weather-planner/1.0"
+    }
+
+    response = requests.get(
+        url,
+        params=params,
+        headers=headers,
+        timeout=15,
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    results = []
+
+    for item in data:
+        label = item.get("display_name", "Unknown location")
+        latitude = float(item["lat"])
+        longitude = float(item["lon"])
+
+        results.append({
+            "label": label,
+            "latitude": latitude,
+            "longitude": longitude,
+            "source": "OpenStreetMap",
+        })
+
+    return results
+
+def search_location_anything(query):
+    """
+    Searches a user-entered location string.
+
+    Supports:
+    - address
+    - place name
+    - coordinates
+    - some Google/Apple map links with visible coordinates
+    """
+
+    query = str(query).strip()
+
+    if query == "":
+        return []
+
+    coordinate_result = extract_coordinates_from_text(query)
+
+    if coordinate_result is not None:
+        return [coordinate_result]
+
+    results = []
+
+    # Try Nominatim first
+    try:
+        nominatim_results = search_location_nominatim(query)
+        results.extend(nominatim_results)
+    except Exception:
+        pass
+
+    # Try Open-Meteo geocoding as fallback
+    try:
+        open_meteo_results = geocode_place(query)
+
+        # Your geocode_place may return one dict or a list depending on your implementation.
+        if isinstance(open_meteo_results, list):
+            for item in open_meteo_results:
+                results.append({
+                    "label": item.get("label", item.get("name", "Open-Meteo result")),
+                    "latitude": item["latitude"],
+                    "longitude": item["longitude"],
+                    "source": "Open-Meteo",
+                })
+
+        elif isinstance(open_meteo_results, dict):
+            label_parts = [
+                open_meteo_results.get("name"),
+                open_meteo_results.get("admin1"),
+                open_meteo_results.get("country"),
+            ]
+
+            label = ", ".join([
+                part for part in label_parts
+                if part
+            ])
+
+            results.append({
+                "label": label,
+                "latitude": open_meteo_results["latitude"],
+                "longitude": open_meteo_results["longitude"],
+                "source": "Open-Meteo",
+            })
+
+    except Exception:
+        pass
+
+    # Deduplicate by rounded lat/lon
+    unique_results = []
+    seen = set()
+
+    for result in results:
+        key = (
+            round(float(result["latitude"]), 5),
+            round(float(result["longitude"]), 5),
+        )
+
+        if key not in seen:
+            unique_results.append(result)
+            seen.add(key)
+
+    return unique_results[:8]
 
 @st.cache_data(ttl=60)
 def load_planned_activities():
@@ -893,6 +1071,148 @@ def update_saved_location(location_id, location_data):
 
     return response
 
+@st.cache_data(ttl=300)
+def load_activity_location_defaults():
+    """
+    Loads default saved locations by activity.
+    """
+
+    columns = [
+        "id",
+        "activity",
+        "saved_location_id",
+    ]
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("activity_location_defaults")
+            .select("*")
+            .order("activity")
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return pd.DataFrame(columns=columns)
+
+        defaults = pd.DataFrame(rows)
+
+        for column in columns:
+            if column not in defaults.columns:
+                defaults[column] = None
+
+        return defaults[columns]
+
+    except Exception as e:
+        st.warning("Could not load activity location defaults.")
+        st.write(e)
+        return pd.DataFrame(columns=columns)
+
+
+def save_activity_location_default(activity, saved_location_id):
+    """
+    Saves or updates the default location for one activity.
+    """
+
+    supabase = get_supabase_client()
+
+    row = {
+        "activity": activity,
+        "saved_location_id": int(saved_location_id),
+    }
+
+    response = (
+        supabase
+        .table("activity_location_defaults")
+        .upsert(
+            row,
+            on_conflict="activity",
+        )
+        .execute()
+    )
+
+    load_activity_location_defaults.clear()
+
+    return response
+
+
+def delete_activity_location_default(activity):
+    """
+    Removes the default location for one activity.
+    """
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase
+        .table("activity_location_defaults")
+        .delete()
+        .eq("activity", activity)
+        .execute()
+    )
+
+    load_activity_location_defaults.clear()
+
+    return response
+
+
+def get_default_location_for_activity(activity, defaults_df, saved_locations_df):
+    """
+    Returns the saved location row for an activity's default location.
+
+    Returns None if no default exists.
+    """
+
+    if defaults_df is None or len(defaults_df) == 0:
+        return None
+
+    if saved_locations_df is None or len(saved_locations_df) == 0:
+        return None
+
+    matching_default = defaults_df[
+        defaults_df["activity"] == activity
+    ]
+
+    if len(matching_default) == 0:
+        return None
+
+    saved_location_id = matching_default.iloc[0]["saved_location_id"]
+
+    if pd.isna(saved_location_id):
+        return None
+
+    matching_location = saved_locations_df[
+        saved_locations_df["id"].astype(str) == str(int(saved_location_id))
+    ]
+
+    if len(matching_location) == 0:
+        return None
+
+    return matching_location.iloc[0].to_dict()
+
+
+def build_location_context_from_location(location):
+    """
+    Builds a JSON-safe location context dictionary.
+    """
+
+    if location is None:
+        return {}
+
+    return clean_json_value({
+        "saved_location_id": location.get("id"),
+        "location_name": location.get("name"),
+        "latitude": location.get("latitude"),
+        "longitude": location.get("longitude"),
+        "location_type": location.get("location_type"),
+        "water_type": location.get("water_type"),
+        "manual_water_temp": location.get("manual_water_temp"),
+        "notes": location.get("notes"),
+    })
 
 def delete_saved_location(location_id):
     """
@@ -958,6 +1278,220 @@ def get_rules_for_hobby(rules_df, hobby):
 # =========================
 # General helper functions
 # =========================
+def show_accuracy_charts(activity_log):
+    """
+    Shows accuracy summaries and charts from the activity log.
+
+    Requires these columns when available:
+    - activity
+    - logged_at
+    - predicted_score
+    - actual_score_0_to_100
+    - prediction_error
+    - absolute_error
+    """
+
+    if activity_log is None or len(activity_log) == 0:
+        st.info("No activity logs available for accuracy charts yet.")
+        return
+
+    chart_log = activity_log.copy()
+
+    required_columns = [
+        "activity",
+        "logged_at",
+        "predicted_score",
+        "actual_score_0_to_100",
+        "prediction_error",
+        "absolute_error",
+    ]
+
+    missing_columns = [
+        column for column in required_columns
+        if column not in chart_log.columns
+    ]
+
+    if len(missing_columns) > 0:
+        st.warning(
+            "Accuracy charts cannot be shown because some required columns are missing."
+        )
+        st.write("Missing columns:")
+        st.write(missing_columns)
+        return
+
+    numeric_columns = [
+        "predicted_score",
+        "actual_score_0_to_100",
+        "prediction_error",
+        "absolute_error",
+    ]
+
+    for column in numeric_columns:
+        chart_log[column] = pd.to_numeric(
+            chart_log[column],
+            errors="coerce",
+        )
+
+    chart_log["logged_at"] = pd.to_datetime(
+        chart_log["logged_at"],
+        errors="coerce",
+    )
+
+    chart_log = chart_log.dropna(
+        subset=[
+            "activity",
+            "logged_at",
+            "predicted_score",
+            "actual_score_0_to_100",
+            "prediction_error",
+            "absolute_error",
+        ]
+    )
+
+    if len(chart_log) == 0:
+        st.info(
+            "Not enough complete log data for accuracy charts yet. "
+            "Logs need predicted and actual scores."
+        )
+        return
+
+    # -------------------------
+    # Accuracy summary
+    # -------------------------
+
+    st.subheader("Accuracy Summary by Activity")
+
+    summary = (
+        chart_log
+        .groupby("activity", as_index=False)
+        .agg(
+            number_of_logs=("activity", "count"),
+            average_error=("prediction_error", "mean"),
+            average_absolute_error=("absolute_error", "mean"),
+            average_predicted_score=("predicted_score", "mean"),
+            average_actual_score=("actual_score_0_to_100", "mean"),
+        )
+    )
+
+    summary["average_error"] = summary["average_error"].round(1)
+    summary["average_absolute_error"] = summary["average_absolute_error"].round(1)
+    summary["average_predicted_score"] = summary["average_predicted_score"].round(1)
+    summary["average_actual_score"] = summary["average_actual_score"].round(1)
+
+    summary = summary.sort_values(
+        "average_absolute_error",
+        ascending=True,
+    )
+
+    st.dataframe(
+        summary,
+        width="stretch",
+    )
+
+    # -------------------------
+    # Average absolute error
+    # -------------------------
+
+    st.subheader("Accuracy Charts")
+
+    st.write("### Average Absolute Error by Activity")
+    st.write("Lower is better.")
+
+    absolute_error_chart = summary.set_index("activity")[
+        "average_absolute_error"
+    ]
+
+    st.bar_chart(absolute_error_chart)
+
+    # -------------------------
+    # Average error
+    # -------------------------
+
+    st.write("### Average Error by Activity")
+    st.write(
+        "Positive means the activity was better than predicted. "
+        "Negative means it was worse than predicted."
+    )
+
+    average_error_chart = summary.set_index("activity")[
+        "average_error"
+    ]
+
+    st.bar_chart(average_error_chart)
+
+    # -------------------------
+    # Predicted vs actual over time
+    # -------------------------
+
+    st.write("### Predicted vs. Actual Over Time")
+
+    chart_activity_options = ["All"] + sorted(
+        chart_log["activity"].dropna().unique().tolist()
+    )
+
+    selected_chart_activity = st.selectbox(
+        "Choose activity for accuracy chart",
+        options=chart_activity_options,
+        key="accuracy_chart_activity_select",
+    )
+
+    if selected_chart_activity == "All":
+        selected_chart_log = chart_log.copy()
+    else:
+        selected_chart_log = chart_log[
+            chart_log["activity"] == selected_chart_activity
+        ].copy()
+
+    selected_chart_log = selected_chart_log.sort_values("logged_at")
+
+    if len(selected_chart_log) == 0:
+        st.info("No logs for this activity yet.")
+        return
+
+    predicted_vs_actual = selected_chart_log[
+        [
+            "logged_at",
+            "predicted_score",
+            "actual_score_0_to_100",
+        ]
+    ].copy()
+
+    predicted_vs_actual = predicted_vs_actual.set_index("logged_at")
+
+    st.line_chart(predicted_vs_actual)
+
+    # -------------------------
+    # Prediction error over time
+    # -------------------------
+
+    st.write("### Prediction Error Over Time")
+
+    error_over_time = selected_chart_log[
+        [
+            "logged_at",
+            "prediction_error",
+        ]
+    ].copy()
+
+    error_over_time = error_over_time.set_index("logged_at")
+
+    st.line_chart(error_over_time)
+
+    # -------------------------
+    # Helpful interpretation
+    # -------------------------
+
+    st.write(
+        """
+        **How to read these charts:**
+
+        - **Average absolute error** shows how far off the predictions are on average.
+        - **Average error** shows direction:
+            - Positive = actual experience was better than predicted.
+            - Negative = actual experience was worse than predicted.
+        - Lower absolute error means the scoring model is more accurate.
+        """
+    )
 
 def is_missing_scalar(value):
     """
@@ -1378,13 +1912,30 @@ def generate_advanced_scenario_features():
     return advanced_features
 
 
-def build_location_context_for_scenario():
+def build_location_context_for_scenario(activity=None):
     """
-    Captures basic location context for scenario ratings.
+    Captures location context for scenario ratings.
 
-    For now, this uses available session state values.
-    Later, this can connect more directly to saved_locations.
+    If an activity has a default saved location, use that.
+    Otherwise, use current app location state.
     """
+
+    try:
+        if activity is not None:
+            saved_locations = load_saved_locations()
+            defaults = load_activity_location_defaults()
+
+            default_location = get_default_location_for_activity(
+                activity=activity,
+                defaults_df=defaults,
+                saved_locations_df=saved_locations,
+            )
+
+            if default_location is not None:
+                return build_location_context_from_location(default_location)
+
+    except Exception:
+        pass
 
     return {
         "latitude": st.session_state.get("latitude"),
@@ -1433,7 +1984,7 @@ def generate_random_scenario(activity):
         scenario[key] = value
 
     scenario["advanced_features"] = advanced_features
-    scenario["location_context"] = build_location_context_for_scenario()
+    scenario["location_context"] = build_location_context_for_scenario(activity)
     scenario["model_features_version"] = "scenario_v1"
 
     return scenario
@@ -1653,7 +2204,7 @@ def historical_row_to_scenario(activity, historical_row):
         scenario[key] = value
 
     scenario["advanced_features"] = advanced_features
-    scenario["location_context"] = build_location_context_for_scenario()
+    scenario["location_context"] = build_location_context_for_scenario(activity)
     scenario["model_features_version"] = "historical_scenario_v1"
     scenario["historical_time"] = str(historical_row["time"])
 
@@ -5590,6 +6141,17 @@ with st.sidebar.expander("📍 Location", expanded=True):
 
     saved_locations = load_saved_locations()
 
+    if st.button("Use current forecast location as candidate"):
+        st.session_state["new_location_search_results"] = [
+            {
+                "label": "Current forecast location",
+                "latitude": latitude,
+                "longitude": longitude,
+                "source": "Current app location",
+            }
+        ]
+        st.rerun()
+
     if len(saved_locations) > 0:
         saved_location_labels = ["Manual / Search Location"] + [
             f"{row['name']} ({row['location_type']})"
@@ -5625,7 +6187,7 @@ with st.sidebar.expander("📍 Location", expanded=True):
 
     if st.button("Find location"):
         try:
-            location_results = geocode_place(location_query)
+            location_results = search_location_anything(location_query)
 
             if len(location_results) == 0:
                 st.warning("No locations found. Try a simpler search.")
@@ -5975,15 +6537,14 @@ with st.spinner("Loading forecast and scoring activities..."):
 
 predictions = add_forecast_confidence(predictions)
 
-home_tab, planner_tab, log_tab, scenario_tab, history_tab, manage_tab, locations_tab = st.tabs(
+home_tab, planner_tab, log_tab, scenario_tab, history_tab, manage_tab = st.tabs(
     [
         "🏠 Home",
         "📅 Planner",
         "➕ Log Activity",
         "🧪 Rate Scenarios",
         "📈 History",
-        "🛠️ Manage Logs",
-        "📍 Locations",
+        "🛠️ Manage",
     ]
 )
 
@@ -6730,6 +7291,21 @@ with home_tab:
             ).reset_index(drop=True)
 
             top_pick = home_day_predictions.iloc[0]
+
+            saved_locations_for_home = load_saved_locations()
+            activity_location_defaults_for_home = load_activity_location_defaults()
+
+            home_default_location = get_default_location_for_activity(
+                activity=top_pick["activity"],
+                defaults_df=activity_location_defaults_for_home,
+                saved_locations_df=saved_locations_for_home,
+            )
+
+            if home_default_location is not None:
+                home_location_name = home_default_location.get("name", "")
+            else:
+                home_location_name = ""
+
             next_best = home_day_predictions.iloc[1:3]
 
             top_window, top_window_score = get_recommended_window_for_activity(
@@ -6764,6 +7340,9 @@ with home_tab:
                         "Best Window",
                         top_window,
                     )
+
+                if home_location_name:
+                    st.write(f"**Location:** {home_location_name}")
 
                 with metric_col2:
                     st.metric(
@@ -7029,6 +7608,9 @@ with planner_tab:
             # Best opportunities
             # -------------------------
 
+            saved_locations_for_planner = load_saved_locations()
+            activity_location_defaults_for_planner = load_activity_location_defaults()
+
             st.subheader("Best Opportunities")
 
             top_opportunity_count = st.slider(
@@ -7052,6 +7634,25 @@ with planner_tab:
                     selected_activity=row["activity"],
                 )
 
+                default_location = get_default_location_for_activity(
+                    activity=row["activity"],
+                    defaults_df=activity_location_defaults_for_planner,
+                    saved_locations_df=saved_locations_for_planner,
+                )
+
+                if default_location is not None:
+                    planner_location_name = default_location.get("name", "")
+                    planner_location_context = build_location_context_from_location(
+                        default_location
+                    )
+                else:
+                    planner_location_name = ""
+                    planner_location_context = {
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "location_query": st.session_state.get("location_query"),
+                    }
+
                 with st.container(border=True):
                     card_col1, card_col2 = st.columns([2, 1])
 
@@ -7069,6 +7670,9 @@ with planner_tab:
                         )
 
                         st.write(f"**Suggested window:** {recommended_window}")
+
+                        if planner_location_name:
+                            st.write(f"**Location:** {planner_location_name}")
 
                         st.write(
                             f"**Planning score:** {row.get('planning_score', 'N/A')}"
@@ -7129,7 +7733,7 @@ with planner_tab:
                                 start_dt=start_dt,
                                 end_dt=end_dt,
                                 description=calendar_description,
-                                location="",
+                                location=planner_location_name,
                             )
 
                             filename = (
@@ -7163,18 +7767,8 @@ with planner_tab:
                                     prediction_row=row,
                                     recommended_window=recommended_window,
                                     notes=plan_notes,
-                                    location_name=st.session_state.get(
-                                        "selected_saved_location_label",
-                                        "",
-                                    ),
-                                    location_context={
-                                        "latitude": latitude,
-                                        "longitude": longitude,
-                                        "location_query": st.session_state.get("location_query"),
-                                        "selected_saved_location_label": st.session_state.get(
-                                            "selected_saved_location_label"
-                                        ),
-                                    },
+                                    location_name=planner_location_name,
+                                    location_context=planner_location_context,
                                 )
 
                                 st.success("Activity saved as planned.")
@@ -7398,265 +7992,6 @@ with planner_tab:
                         st.rerun()
                     else:
                         st.warning("Check the confirmation box before deleting.")
-
-with locations_tab:
-    st.header("Saved Locations")
-
-    saved_locations = load_saved_locations()
-
-    st.subheader("Add New Location")
-
-    with st.form("add_saved_location_form"):
-        new_location_name = st.text_input(
-            "Location name",
-            placeholder="Example: Local Pond, Tennis Courts, Kayak Launch",
-        )
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            new_location_latitude = st.number_input(
-                "Latitude",
-                format="%.6f",
-                value=float(latitude),
-            )
-
-        with col2:
-            new_location_longitude = st.number_input(
-                "Longitude",
-                format="%.6f",
-                value=float(longitude),
-            )
-
-        location_type_options = [
-            "Home",
-            "Lake",
-            "River",
-            "Pond",
-            "Beach",
-            "Park",
-            "Disc Golf Course",
-            "Tennis Courts",
-            "Campground",
-            "Trail",
-            "Other",
-        ]
-
-        new_location_type = st.selectbox(
-            "Location type",
-            options=location_type_options,
-        )
-
-        water_type_options = [
-            "Not applicable",
-            "Freshwater lake",
-            "River",
-            "Pond",
-            "Great Lake",
-            "Ocean/coastal",
-            "Unknown",
-        ]
-
-        new_water_type = st.selectbox(
-            "Water type",
-            options=water_type_options,
-        )
-
-        activity_options = sorted(predictions["activity"].unique())
-
-        new_default_activities = st.multiselect(
-            "Default activities for this location",
-            options=activity_options,
-        )
-
-        use_location_water_temp = st.checkbox(
-            "Set manual water temperature for this location",
-            value=False,
-        )
-
-        if use_location_water_temp:
-            new_manual_water_temp = st.number_input(
-                "Manual water temperature °F",
-                min_value=32,
-                max_value=95,
-                value=65,
-            )
-        else:
-            new_manual_water_temp = None
-
-        new_location_notes = st.text_area(
-            "Notes",
-            placeholder="Example: sheltered from wind, muddy after rain, good bass spot",
-        )
-
-        submitted_location = st.form_submit_button("Save Location")
-
-        if submitted_location:
-            if new_location_name.strip() == "":
-                st.error("Location name is required.")
-            else:
-                save_saved_location({
-                    "name": new_location_name,
-                    "latitude": new_location_latitude,
-                    "longitude": new_location_longitude,
-                    "location_type": new_location_type,
-                    "water_type": new_water_type,
-                    "default_activities": new_default_activities,
-                    "manual_water_temp": new_manual_water_temp,
-                    "notes": new_location_notes,
-                })
-
-                st.success("Location saved.")
-                st.rerun()
-
-    st.subheader("Existing Locations")
-
-    if len(saved_locations) == 0:
-        st.info("No saved locations yet.")
-
-    else:
-        st.dataframe(
-            saved_locations,
-            width="stretch",
-        )
-
-        saved_locations["display_label"] = (
-            saved_locations["id"].astype(str)
-            + " | "
-            + saved_locations["name"].astype(str)
-            + " | "
-            + saved_locations["location_type"].astype(str)
-        )
-
-        selected_location_label = st.selectbox(
-            "Choose location to edit/delete",
-            options=saved_locations["display_label"].tolist(),
-            key="edit_saved_location_selectbox",
-        )
-
-        selected_location = saved_locations[
-            saved_locations["display_label"] == selected_location_label
-        ].iloc[0]
-
-        selected_location_id = int(selected_location["id"])
-
-        with st.expander("Edit selected location", expanded=False):
-            edit_location_name = st.text_input(
-                "Location name",
-                value=str(selected_location.get("name", "")),
-                key=f"edit_location_name_{selected_location_id}",
-            )
-
-            edit_col1, edit_col2 = st.columns(2)
-
-            with edit_col1:
-                edit_latitude = st.number_input(
-                    "Latitude",
-                    format="%.6f",
-                    value=float(selected_location.get("latitude", latitude)),
-                    key=f"edit_location_lat_{selected_location_id}",
-                )
-
-            with edit_col2:
-                edit_longitude = st.number_input(
-                    "Longitude",
-                    format="%.6f",
-                    value=float(selected_location.get("longitude", longitude)),
-                    key=f"edit_location_lon_{selected_location_id}",
-                )
-
-            edit_location_type = st.selectbox(
-                "Location type",
-                options=location_type_options,
-                index=location_type_options.index(selected_location.get("location_type"))
-                if selected_location.get("location_type") in location_type_options
-                else 0,
-                key=f"edit_location_type_{selected_location_id}",
-            )
-
-            edit_water_type = st.selectbox(
-                "Water type",
-                options=water_type_options,
-                index=water_type_options.index(selected_location.get("water_type"))
-                if selected_location.get("water_type") in water_type_options
-                else 0,
-                key=f"edit_water_type_{selected_location_id}",
-            )
-
-            current_default_activities = selected_location.get("default_activities", [])
-
-            if not isinstance(current_default_activities, list):
-                current_default_activities = []
-
-            edit_default_activities = st.multiselect(
-                "Default activities",
-                options=activity_options,
-                default=[
-                    activity
-                    for activity in current_default_activities
-                    if activity in activity_options
-                ],
-                key=f"edit_default_activities_{selected_location_id}",
-            )
-
-            current_water_temp = selected_location.get("manual_water_temp")
-
-            use_edit_water_temp = st.checkbox(
-                "Set manual water temperature for this location",
-                value=not pd.isna(current_water_temp),
-                key=f"edit_use_water_temp_{selected_location_id}",
-            )
-
-            if use_edit_water_temp:
-                edit_manual_water_temp = st.number_input(
-                    "Manual water temperature °F",
-                    min_value=32,
-                    max_value=95,
-                    value=65 if pd.isna(current_water_temp) else int(float(current_water_temp)),
-                    key=f"edit_manual_water_temp_{selected_location_id}",
-                )
-            else:
-                edit_manual_water_temp = None
-
-            edit_notes = st.text_area(
-                "Notes",
-                value="" if pd.isna(selected_location.get("notes")) else str(selected_location.get("notes")),
-                key=f"edit_location_notes_{selected_location_id}",
-            )
-
-            if st.button("Save location edits", key=f"save_location_edits_{selected_location_id}"):
-                update_saved_location(
-                    selected_location_id,
-                    {
-                        "name": edit_location_name,
-                        "latitude": edit_latitude,
-                        "longitude": edit_longitude,
-                        "location_type": edit_location_type,
-                        "water_type": edit_water_type,
-                        "default_activities": edit_default_activities,
-                        "manual_water_temp": edit_manual_water_temp,
-                        "notes": edit_notes,
-                    },
-                )
-
-                st.success("Location updated.")
-                st.rerun()
-
-        with st.expander("Danger zone: delete location", expanded=False):
-            st.warning("Deleting a saved location cannot be undone.")
-
-            confirm_delete_location = st.checkbox(
-                "Yes, delete this saved location",
-                key=f"confirm_delete_location_{selected_location_id}",
-            )
-
-            if st.button("Delete saved location", key=f"delete_location_{selected_location_id}"):
-                if confirm_delete_location:
-                    delete_saved_location(selected_location_id)
-                    st.success("Location deleted.")
-                    st.rerun()
-                else:
-                    st.warning("Check the confirmation box before deleting.")
 
 # -------------------------
 # Log actual result
@@ -7935,147 +8270,6 @@ with log_tab:
             st.write(type(e).__name__)
             st.write(e)
 
-    def show_accuracy_charts(activity_log):
-        """
-        Shows accuracy summaries and charts from the activity log.
-        """
-
-        chart_log = activity_log.copy()
-
-        numeric_columns = [
-            "predicted_score",
-            "actual_score_0_to_100",
-            "prediction_error",
-            "absolute_error",
-        ]
-
-        for column in numeric_columns:
-            chart_log[column] = pd.to_numeric(
-                chart_log[column],
-                errors="coerce",
-            )
-
-        chart_log["logged_at"] = pd.to_datetime(
-            chart_log["logged_at"],
-            errors="coerce",
-        )
-
-        chart_log = chart_log.dropna(
-            subset=[
-                "logged_at",
-                "predicted_score",
-                "actual_score_0_to_100",
-                "prediction_error",
-                "absolute_error",
-            ]
-        )
-
-        if len(chart_log) == 0:
-            st.info("Not enough valid log data for summaries or charts yet.")
-            return
-
-        st.subheader("Accuracy Summary by Activity")
-
-        summary = (
-            chart_log
-            .groupby("activity", as_index=False)
-            .agg(
-                number_of_logs=("activity", "count"),
-                average_error=("prediction_error", "mean"),
-                average_absolute_error=("absolute_error", "mean"),
-            )
-        )
-
-        summary["average_error"] = summary["average_error"].round(1)
-        summary["average_absolute_error"] = summary["average_absolute_error"].round(1)
-
-        st.dataframe(summary, width="stretch")
-
-        st.subheader("Accuracy Charts")
-
-        st.write("### Average Absolute Error by Activity")
-        st.write("Lower is better.")
-
-        error_by_activity = (
-            chart_log
-            .groupby("activity", as_index=False)
-            .agg(
-                average_absolute_error=("absolute_error", "mean"),
-                average_error=("prediction_error", "mean"),
-            )
-        )
-
-        error_by_activity["average_absolute_error"] = (
-            error_by_activity["average_absolute_error"].round(1)
-        )
-
-        error_by_activity["average_error"] = (
-            error_by_activity["average_error"].round(1)
-        )
-
-        st.bar_chart(
-            error_by_activity.set_index("activity")["average_absolute_error"]
-        )
-
-        st.write("### Average Error by Activity")
-        st.write(
-            "Positive means the activity was better than predicted. "
-            "Negative means it was worse than predicted."
-        )
-
-        st.bar_chart(
-            error_by_activity.set_index("activity")["average_error"]
-        )
-
-        st.write("### Predicted vs. Actual Over Time")
-
-        chart_activity_options = ["All"] + sorted(
-            chart_log["activity"].dropna().unique().tolist()
-        )
-
-        selected_chart_activity = st.selectbox(
-            "Choose activity for accuracy chart",
-            options=chart_activity_options,
-        )
-
-        if selected_chart_activity == "All":
-            selected_chart_log = chart_log.copy()
-        else:
-            selected_chart_log = chart_log[
-                chart_log["activity"] == selected_chart_activity
-            ].copy()
-
-        selected_chart_log = selected_chart_log.sort_values("logged_at")
-
-        if len(selected_chart_log) == 0:
-            st.info("No logs for this activity yet.")
-            return
-
-        predicted_vs_actual = selected_chart_log[
-            [
-                "logged_at",
-                "predicted_score",
-                "actual_score_0_to_100",
-            ]
-        ].copy()
-
-        predicted_vs_actual = predicted_vs_actual.set_index("logged_at")
-
-        st.line_chart(predicted_vs_actual)
-
-        st.write("### Prediction Error Over Time")
-
-        error_over_time = selected_chart_log[
-            [
-                "logged_at",
-                "prediction_error",
-            ]
-        ].copy()
-
-        error_over_time = error_over_time.set_index("logged_at")
-
-        st.line_chart(error_over_time)
-
 # -------------------------
 # Show history
 # -------------------------
@@ -8133,284 +8327,779 @@ with history_tab:
 
 
 with manage_tab:
-    st.header("Manage Logs")
+    st.header("Manage")
 
-    if len(activity_log) == 0:
-        st.info("No log entries available to manage.")
+    manage_view = st.radio(
+        "What would you like to manage?",
+        options=[
+            "Activity Logs",
+            "Saved Locations",
+            "Planned Activities",
+        ],
+        horizontal=True,
+        key="manage_view_selector",
+    )
 
-    elif "id" not in activity_log.columns:
-        st.warning("Log IDs are not available, so entries cannot be edited or deleted yet.")
+    if manage_view == "Activity Logs":
+        st.subheader("Activity Logs")
 
-    else:
-        manage_log = activity_log.copy()
+        activity_log = load_activity_log()
 
-        manage_log["display_label"] = (
-            manage_log["id"].astype(str)
-            + " | "
-            + manage_log["date"].astype(str)
-            + " | "
-            + manage_log["activity"].astype(str)
-            + " | score "
-            + manage_log["actual_enjoyment_1_to_10"].astype(str)
-            + " | "
-            + manage_log["notes"].fillna("").astype(str).str.slice(0, 40)
-        )
+        if len(activity_log) == 0:
+            st.info("No log entries available to manage.")
 
-        selected_log_label = st.selectbox(
-            "Choose a log entry to manage",
-            options=manage_log["display_label"].tolist(),
-            key="manage_log_selectbox",
-        )
+        elif "id" not in activity_log.columns:
+            st.warning("Log IDs are not available, so entries cannot be edited or deleted yet.")
 
-        selected_log = manage_log[
-            manage_log["display_label"] == selected_log_label
-        ].iloc[0]
+        else:
+            manage_log = activity_log.copy()
 
-        selected_log_id = int(selected_log["id"])
+            manage_log["display_label"] = (
+                manage_log["id"].astype(str)
+                + " | "
+                + manage_log["date"].astype(str)
+                + " | "
+                + manage_log["activity"].astype(str)
+                + " | score "
+                + manage_log["actual_enjoyment_1_to_10"].astype(str)
+                + " | "
+                + manage_log["notes"].fillna("").astype(str).str.slice(0, 40)
+            )
 
-        st.write("Selected log:")
+            selected_log_label = st.selectbox(
+                "Choose a log entry to manage",
+                options=manage_log["display_label"].tolist(),
+                key="manage_log_selectbox",
+            )
 
-        st.dataframe(
-            pd.DataFrame([selected_log.drop(labels=["display_label"])]),
-            width="stretch",
-        )
+            selected_log = manage_log[
+                manage_log["display_label"] == selected_log_label
+            ].iloc[0]
 
-        st.markdown("---")
-        st.write("### Edit Selected Log")
+            selected_log_id = int(selected_log["id"])
 
-        def safe_int_value(value, default=5):
-            try:
-                if pd.isna(value):
+            st.write("Selected log:")
+
+            st.dataframe(
+                pd.DataFrame([selected_log.drop(labels=["display_label"])]),
+                width="stretch",
+            )
+
+            st.markdown("---")
+            st.write("### Edit Selected Log")
+
+            def safe_int_value(value, default=5):
+                try:
+                    if pd.isna(value):
+                        return default
+                    return int(float(value))
+                except Exception:
                     return default
-                return int(float(value))
-            except Exception:
+
+            def safe_text_value(value, default=""):
+                try:
+                    if pd.isna(value):
+                        return default
+                    return str(value)
+                except Exception:
+                    return default
+
+            def safe_option_value(value, options, default):
+                value = safe_text_value(value, default)
+
+                if value in options:
+                    return value
+
                 return default
 
-        def safe_text_value(value, default=""):
+            with st.expander("Edit score and notes", expanded=True):
+                actual_time_edit = st.text_input(
+                    "Actual time",
+                    value=safe_text_value(selected_log.get("actual_time", "")),
+                    key=f"edit_actual_time_{selected_log_id}",
+                )
+
+                enjoyment_edit = st.slider(
+                    "Actual enjoyment score",
+                    min_value=1,
+                    max_value=10,
+                    value=safe_int_value(
+                        selected_log.get("actual_enjoyment_1_to_10", 7),
+                        default=7,
+                    ),
+                    key=f"edit_enjoyment_{selected_log_id}",
+                )
+
+                did_i_go_options = ["Yes", "No", "Partially"]
+
+                did_i_go_edit = st.selectbox(
+                    "Did you actually do this activity?",
+                    options=did_i_go_options,
+                    index=did_i_go_options.index(
+                        safe_option_value(
+                            selected_log.get("did_i_go", "Yes"),
+                            did_i_go_options,
+                            "Yes",
+                        )
+                    ),
+                    key=f"edit_did_i_go_{selected_log_id}",
+                )
+
+                notes_edit = st.text_area(
+                    "Notes",
+                    value=safe_text_value(selected_log.get("notes", "")),
+                    key=f"edit_notes_{selected_log_id}",
+                )
+
+            with st.expander("Edit conditions", expanded=False):
+                followed_options = ["Not sure", "Yes", "No", "Partially"]
+
+                followed_recommended_window_edit = st.selectbox(
+                    "Did you go during the recommended time window?",
+                    options=followed_options,
+                    index=followed_options.index(
+                        safe_option_value(
+                            selected_log.get("followed_recommended_window", "Not sure"),
+                            followed_options,
+                            "Not sure",
+                        )
+                    ),
+                    key=f"edit_followed_window_{selected_log_id}",
+                )
+
+                actual_bugs_edit = st.slider(
+                    "Actual bugs",
+                    min_value=0,
+                    max_value=10,
+                    value=safe_int_value(
+                        selected_log.get("actual_bugs_1_to_10", 5),
+                        default=5,
+                    ),
+                    key=f"edit_bugs_{selected_log_id}",
+                )
+
+                actual_wind_annoyance_edit = st.slider(
+                    "Actual wind annoyance",
+                    min_value=0,
+                    max_value=10,
+                    value=safe_int_value(
+                        selected_log.get("actual_wind_annoyance_1_to_10", 5),
+                        default=5,
+                    ),
+                    key=f"edit_wind_{selected_log_id}",
+                )
+
+                actual_humidity_comfort_edit = st.slider(
+                    "Actual humidity comfort",
+                    min_value=0,
+                    max_value=10,
+                    value=safe_int_value(
+                        selected_log.get("actual_humidity_comfort_1_to_10", 7),
+                        default=7,
+                    ),
+                    key=f"edit_humidity_{selected_log_id}",
+                )
+
+                ground_options = ["Dry", "Damp", "Muddy", "Very muddy", "Not sure", "Not applicable"]
+
+                actual_ground_wetness_edit = st.selectbox(
+                    "Actual ground/course/trail condition",
+                    options=ground_options,
+                    index=ground_options.index(
+                        safe_option_value(
+                            selected_log.get("actual_ground_wetness", "Not applicable"),
+                            ground_options,
+                            "Not applicable",
+                        )
+                    ),
+                    key=f"edit_ground_{selected_log_id}",
+                )
+
+                water_options = ["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure", "Not applicable"]
+
+                actual_water_conditions_edit = st.selectbox(
+                    "Actual water conditions",
+                    options=water_options,
+                    index=water_options.index(
+                        safe_option_value(
+                            selected_log.get("actual_water_conditions", "Not applicable"),
+                            water_options,
+                            "Not applicable",
+                        )
+                    ),
+                    key=f"edit_water_{selected_log_id}",
+                )
+
+                fish_options = ["None", "Low", "Medium", "High", "Not sure", "Not applicable"]
+
+                fish_activity_edit = st.selectbox(
+                    "Fish activity",
+                    options=fish_options,
+                    index=fish_options.index(
+                        safe_option_value(
+                            selected_log.get("fish_activity", "Not applicable"),
+                            fish_options,
+                            "Not applicable",
+                        )
+                    ),
+                    key=f"edit_fish_{selected_log_id}",
+                )
+
+                visibility_options = ["Bright daylight", "Low light but okay", "Too dark", "Not sure", "Not applicable"]
+
+                visibility_light_edit = st.selectbox(
+                    "Visibility/light conditions",
+                    options=visibility_options,
+                    index=visibility_options.index(
+                        safe_option_value(
+                            selected_log.get("visibility_light", "Not applicable"),
+                            visibility_options,
+                            "Not applicable",
+                        )
+                    ),
+                    key=f"edit_visibility_{selected_log_id}",
+                )
+
+            predicted_score_for_edit = selected_log.get("predicted_score", None)
+            actual_score_edit = enjoyment_edit * 10
+
             try:
-                if pd.isna(value):
-                    return default
-                return str(value)
+                if pd.isna(predicted_score_for_edit):
+                    prediction_error_edit = None
+                    absolute_error_edit = None
+                else:
+                    prediction_error_edit = actual_score_edit - float(predicted_score_for_edit)
+                    absolute_error_edit = abs(prediction_error_edit)
             except Exception:
-                return default
-
-        def safe_option_value(value, options, default):
-            value = safe_text_value(value, default)
-
-            if value in options:
-                return value
-
-            return default
-
-        with st.expander("Edit score and notes", expanded=True):
-            actual_time_edit = st.text_input(
-                "Actual time",
-                value=safe_text_value(selected_log.get("actual_time", "")),
-                key=f"edit_actual_time_{selected_log_id}",
-            )
-
-            enjoyment_edit = st.slider(
-                "Actual enjoyment score",
-                min_value=1,
-                max_value=10,
-                value=safe_int_value(
-                    selected_log.get("actual_enjoyment_1_to_10", 7),
-                    default=7,
-                ),
-                key=f"edit_enjoyment_{selected_log_id}",
-            )
-
-            did_i_go_options = ["Yes", "No", "Partially"]
-
-            did_i_go_edit = st.selectbox(
-                "Did you actually do this activity?",
-                options=did_i_go_options,
-                index=did_i_go_options.index(
-                    safe_option_value(
-                        selected_log.get("did_i_go", "Yes"),
-                        did_i_go_options,
-                        "Yes",
-                    )
-                ),
-                key=f"edit_did_i_go_{selected_log_id}",
-            )
-
-            notes_edit = st.text_area(
-                "Notes",
-                value=safe_text_value(selected_log.get("notes", "")),
-                key=f"edit_notes_{selected_log_id}",
-            )
-
-        with st.expander("Edit conditions", expanded=False):
-            followed_options = ["Not sure", "Yes", "No", "Partially"]
-
-            followed_recommended_window_edit = st.selectbox(
-                "Did you go during the recommended time window?",
-                options=followed_options,
-                index=followed_options.index(
-                    safe_option_value(
-                        selected_log.get("followed_recommended_window", "Not sure"),
-                        followed_options,
-                        "Not sure",
-                    )
-                ),
-                key=f"edit_followed_window_{selected_log_id}",
-            )
-
-            actual_bugs_edit = st.slider(
-                "Actual bugs",
-                min_value=0,
-                max_value=10,
-                value=safe_int_value(
-                    selected_log.get("actual_bugs_1_to_10", 5),
-                    default=5,
-                ),
-                key=f"edit_bugs_{selected_log_id}",
-            )
-
-            actual_wind_annoyance_edit = st.slider(
-                "Actual wind annoyance",
-                min_value=0,
-                max_value=10,
-                value=safe_int_value(
-                    selected_log.get("actual_wind_annoyance_1_to_10", 5),
-                    default=5,
-                ),
-                key=f"edit_wind_{selected_log_id}",
-            )
-
-            actual_humidity_comfort_edit = st.slider(
-                "Actual humidity comfort",
-                min_value=0,
-                max_value=10,
-                value=safe_int_value(
-                    selected_log.get("actual_humidity_comfort_1_to_10", 7),
-                    default=7,
-                ),
-                key=f"edit_humidity_{selected_log_id}",
-            )
-
-            ground_options = ["Dry", "Damp", "Muddy", "Very muddy", "Not sure", "Not applicable"]
-
-            actual_ground_wetness_edit = st.selectbox(
-                "Actual ground/course/trail condition",
-                options=ground_options,
-                index=ground_options.index(
-                    safe_option_value(
-                        selected_log.get("actual_ground_wetness", "Not applicable"),
-                        ground_options,
-                        "Not applicable",
-                    )
-                ),
-                key=f"edit_ground_{selected_log_id}",
-            )
-
-            water_options = ["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure", "Not applicable"]
-
-            actual_water_conditions_edit = st.selectbox(
-                "Actual water conditions",
-                options=water_options,
-                index=water_options.index(
-                    safe_option_value(
-                        selected_log.get("actual_water_conditions", "Not applicable"),
-                        water_options,
-                        "Not applicable",
-                    )
-                ),
-                key=f"edit_water_{selected_log_id}",
-            )
-
-            fish_options = ["None", "Low", "Medium", "High", "Not sure", "Not applicable"]
-
-            fish_activity_edit = st.selectbox(
-                "Fish activity",
-                options=fish_options,
-                index=fish_options.index(
-                    safe_option_value(
-                        selected_log.get("fish_activity", "Not applicable"),
-                        fish_options,
-                        "Not applicable",
-                    )
-                ),
-                key=f"edit_fish_{selected_log_id}",
-            )
-
-            visibility_options = ["Bright daylight", "Low light but okay", "Too dark", "Not sure", "Not applicable"]
-
-            visibility_light_edit = st.selectbox(
-                "Visibility/light conditions",
-                options=visibility_options,
-                index=visibility_options.index(
-                    safe_option_value(
-                        selected_log.get("visibility_light", "Not applicable"),
-                        visibility_options,
-                        "Not applicable",
-                    )
-                ),
-                key=f"edit_visibility_{selected_log_id}",
-            )
-
-        predicted_score_for_edit = selected_log.get("predicted_score", None)
-        actual_score_edit = enjoyment_edit * 10
-
-        try:
-            if pd.isna(predicted_score_for_edit):
                 prediction_error_edit = None
                 absolute_error_edit = None
-            else:
-                prediction_error_edit = actual_score_edit - float(predicted_score_for_edit)
-                absolute_error_edit = abs(prediction_error_edit)
-        except Exception:
-            prediction_error_edit = None
-            absolute_error_edit = None
 
-        if st.button("Save edits to selected log", key=f"save_edits_{selected_log_id}"):
-            updated_entry = {
-                "actual_time": actual_time_edit,
-                "followed_recommended_window": followed_recommended_window_edit,
-                "actual_enjoyment_1_to_10": enjoyment_edit,
-                "actual_score_0_to_100": actual_score_edit,
-                "prediction_error": prediction_error_edit,
-                "absolute_error": absolute_error_edit,
-                "did_i_go": did_i_go_edit,
-                "actual_bugs_1_to_10": actual_bugs_edit,
-                "actual_wind_annoyance_1_to_10": actual_wind_annoyance_edit,
-                "actual_humidity_comfort_1_to_10": actual_humidity_comfort_edit,
-                "actual_ground_wetness": actual_ground_wetness_edit,
-                "actual_water_conditions": actual_water_conditions_edit,
-                "fish_activity": fish_activity_edit,
-                "visibility_light": visibility_light_edit,
-                "notes": notes_edit,
-            }
+            if st.button("Save edits to selected log", key=f"save_edits_{selected_log_id}"):
+                updated_entry = {
+                    "actual_time": actual_time_edit,
+                    "followed_recommended_window": followed_recommended_window_edit,
+                    "actual_enjoyment_1_to_10": enjoyment_edit,
+                    "actual_score_0_to_100": actual_score_edit,
+                    "prediction_error": prediction_error_edit,
+                    "absolute_error": absolute_error_edit,
+                    "did_i_go": did_i_go_edit,
+                    "actual_bugs_1_to_10": actual_bugs_edit,
+                    "actual_wind_annoyance_1_to_10": actual_wind_annoyance_edit,
+                    "actual_humidity_comfort_1_to_10": actual_humidity_comfort_edit,
+                    "actual_ground_wetness": actual_ground_wetness_edit,
+                    "actual_water_conditions": actual_water_conditions_edit,
+                    "fish_activity": fish_activity_edit,
+                    "visibility_light": visibility_light_edit,
+                    "notes": notes_edit,
+                }
 
-            try:
-                update_log_entry(selected_log_id, updated_entry)
-                load_activity_log.clear()
-                st.success("Log entry updated.")
-                st.rerun()
-
-            except Exception as e:
-                st.error("Could not update log entry.")
-                st.write(type(e).__name__)
-                st.write(e)
-
-        st.markdown("---")
-
-        with st.expander("Danger zone: delete log", expanded=False):
-            st.warning("Deleting a log entry cannot be undone.")
-
-            confirm_delete = st.checkbox(
-                "Yes, I want to delete this log entry",
-                key=f"confirm_delete_log_{selected_log_id}",
-            )
-
-            if st.button("Delete selected log entry", key=f"delete_log_button_{selected_log_id}"):
-                if confirm_delete:
-                    delete_log_entry(selected_log_id)
+                try:
+                    update_log_entry(selected_log_id, updated_entry)
                     load_activity_log.clear()
-
-                    st.success("Log entry deleted.")
+                    st.success("Log entry updated.")
                     st.rerun()
 
+                except Exception as e:
+                    st.error("Could not update log entry.")
+                    st.write(type(e).__name__)
+                    st.write(e)
+
+            st.markdown("---")
+
+            with st.expander("Danger zone: delete log", expanded=False):
+                st.warning("Deleting a log entry cannot be undone.")
+
+                confirm_delete = st.checkbox(
+                    "Yes, I want to delete this log entry",
+                    key=f"confirm_delete_log_{selected_log_id}",
+                )
+
+                if st.button("Delete selected log entry", key=f"delete_log_button_{selected_log_id}"):
+                    if confirm_delete:
+                        delete_log_entry(selected_log_id)
+                        load_activity_log.clear()
+
+                        st.success("Log entry deleted.")
+                        st.rerun()
+
+                    else:
+                        st.warning("Check the confirmation box before deleting.")
+
+    elif manage_view == "Saved Locations":
+        st.subheader("Saved Locations")
+
+        saved_locations = load_saved_locations()
+
+        st.write("### Add New Location")
+
+        location_search_input = st.text_input(
+            "Search address/place or paste map link",
+            placeholder="Example: Gallup Park Ann Arbor or 3000 Fuller Rd Ann Arbor",
+            key="manage_new_location_search_input",
+        )
+
+        if st.button("Find saved location candidate", key="manage_find_location_candidate"):
+            location_search_results = search_location_anything(
+                location_search_input
+            )
+
+            st.session_state["new_location_search_results"] = location_search_results
+
+            if len(location_search_results) == 0:
+                st.warning("No matching locations found. Try a different search.")
+            else:
+                st.success("Location candidates found.")
+
+        location_search_results = st.session_state.get(
+            "new_location_search_results",
+            [],
+        )
+
+        selected_candidate = None
+
+        if len(location_search_results) > 0:
+            candidate_labels = [
+                f"{item['label']} ({item.get('source', 'source unknown')})"
+                for item in location_search_results
+            ]
+
+            selected_candidate_label = st.selectbox(
+                "Choose location candidate",
+                options=candidate_labels,
+                key="manage_new_location_candidate_select",
+            )
+
+            selected_index = candidate_labels.index(selected_candidate_label)
+            selected_candidate = location_search_results[selected_index]
+
+            st.write(
+                f"Selected coordinates: "
+                f"{selected_candidate['latitude']}, {selected_candidate['longitude']}"
+            )
+
+        with st.form("manage_add_saved_location_form"):
+            default_name = ""
+
+            if selected_candidate is not None:
+                default_name = selected_candidate["label"].split(",")[0]
+
+            new_location_name = st.text_input(
+                "Location name",
+                value=default_name,
+                placeholder="Example: Local Pond, Tennis Courts, Kayak Launch",
+            )
+
+            if selected_candidate is not None:
+                default_latitude = float(selected_candidate["latitude"])
+                default_longitude = float(selected_candidate["longitude"])
+            else:
+                default_latitude = float(latitude)
+                default_longitude = float(longitude)
+
+            with st.expander("Advanced: coordinates", expanded=False):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    new_location_latitude = st.number_input(
+                        "Latitude",
+                        format="%.6f",
+                        value=default_latitude,
+                    )
+
+                with col2:
+                    new_location_longitude = st.number_input(
+                        "Longitude",
+                        format="%.6f",
+                        value=default_longitude,
+                    )
+
+            location_type_options = [
+                "Home",
+                "Lake",
+                "River",
+                "Pond",
+                "Beach",
+                "Park",
+                "Disc Golf Course",
+                "Tennis Courts",
+                "Campground",
+                "Trail",
+                "Other",
+            ]
+
+            new_location_type = st.selectbox(
+                "Location type",
+                options=location_type_options,
+            )
+
+            water_type_options = [
+                "Not applicable",
+                "Freshwater lake",
+                "River",
+                "Pond",
+                "Great Lake",
+                "Ocean/coastal",
+                "Unknown",
+            ]
+
+            new_water_type = st.selectbox(
+                "Water type",
+                options=water_type_options,
+            )
+
+            activity_options = sorted(predictions["activity"].unique())
+
+            new_default_activities = st.multiselect(
+                "Default activities for this location",
+                options=activity_options,
+            )
+
+            use_location_water_temp = st.checkbox(
+                "Set manual water temperature for this location",
+                value=False,
+            )
+
+            if use_location_water_temp:
+                new_manual_water_temp = st.number_input(
+                    "Manual water temperature °F",
+                    min_value=32,
+                    max_value=95,
+                    value=65,
+                )
+            else:
+                new_manual_water_temp = None
+
+            new_location_notes = st.text_area(
+                "Notes",
+                placeholder="Example: sheltered from wind, muddy after rain, good bass spot",
+            )
+
+            submitted_location = st.form_submit_button("Save Location")
+
+            if submitted_location:
+                if new_location_name.strip() == "":
+                    st.error("Location name is required.")
                 else:
-                    st.warning("Check the confirmation box before deleting.")
+                    save_saved_location({
+                        "name": new_location_name,
+                        "latitude": new_location_latitude,
+                        "longitude": new_location_longitude,
+                        "location_type": new_location_type,
+                        "water_type": new_water_type,
+                        "default_activities": new_default_activities,
+                        "manual_water_temp": new_manual_water_temp,
+                        "notes": new_location_notes,
+                    })
+
+                    st.success("Location saved.")
+                    st.rerun()
+
+        st.write("### Existing Locations")
+
+        if len(saved_locations) == 0:
+            st.info("No saved locations yet.")
+
+        else:
+            st.dataframe(
+                saved_locations,
+                width="stretch",
+            )
+
+            saved_locations["display_label"] = (
+                saved_locations["id"].astype(str)
+                + " | "
+                + saved_locations["name"].astype(str)
+                + " | "
+                + saved_locations["location_type"].astype(str)
+            )
+
+            selected_location_label = st.selectbox(
+                "Choose location to edit/delete",
+                options=saved_locations["display_label"].tolist(),
+                key="manage_edit_saved_location_selectbox",
+            )
+
+            selected_location = saved_locations[
+                saved_locations["display_label"] == selected_location_label
+            ].iloc[0]
+
+            selected_location_id = int(selected_location["id"])
+
+            with st.expander("Edit selected location", expanded=False):
+                edit_location_name = st.text_input(
+                    "Location name",
+                    value=str(selected_location.get("name", "")),
+                    key=f"edit_location_name_{selected_location_id}",
+                )
+
+                edit_col1, edit_col2 = st.columns(2)
+
+                with edit_col1:
+                    edit_latitude = st.number_input(
+                        "Latitude",
+                        format="%.6f",
+                        value=float(selected_location.get("latitude", latitude)),
+                        key=f"edit_location_lat_{selected_location_id}",
+                    )
+
+                with edit_col2:
+                    edit_longitude = st.number_input(
+                        "Longitude",
+                        format="%.6f",
+                        value=float(selected_location.get("longitude", longitude)),
+                        key=f"edit_location_lon_{selected_location_id}",
+                    )
+
+                edit_location_type = st.selectbox(
+                    "Location type",
+                    options=location_type_options,
+                    index=location_type_options.index(selected_location.get("location_type"))
+                    if selected_location.get("location_type") in location_type_options
+                    else 0,
+                    key=f"edit_location_type_{selected_location_id}",
+                )
+
+                edit_water_type = st.selectbox(
+                    "Water type",
+                    options=water_type_options,
+                    index=water_type_options.index(selected_location.get("water_type"))
+                    if selected_location.get("water_type") in water_type_options
+                    else 0,
+                    key=f"edit_water_type_{selected_location_id}",
+                )
+
+                current_default_activities = selected_location.get("default_activities", [])
+
+                if not isinstance(current_default_activities, list):
+                    current_default_activities = []
+
+                edit_default_activities = st.multiselect(
+                    "Default activities",
+                    options=activity_options,
+                    default=[
+                        activity
+                        for activity in current_default_activities
+                        if activity in activity_options
+                    ],
+                    key=f"edit_default_activities_{selected_location_id}",
+                )
+
+                current_water_temp = selected_location.get("manual_water_temp")
+
+                use_edit_water_temp = st.checkbox(
+                    "Set manual water temperature for this location",
+                    value=not pd.isna(current_water_temp),
+                    key=f"edit_use_water_temp_{selected_location_id}",
+                )
+
+                if use_edit_water_temp:
+                    edit_manual_water_temp = st.number_input(
+                        "Manual water temperature °F",
+                        min_value=32,
+                        max_value=95,
+                        value=65 if pd.isna(current_water_temp) else int(float(current_water_temp)),
+                        key=f"edit_manual_water_temp_{selected_location_id}",
+                    )
+                else:
+                    edit_manual_water_temp = None
+
+                edit_notes = st.text_area(
+                    "Notes",
+                    value="" if pd.isna(selected_location.get("notes")) else str(selected_location.get("notes")),
+                    key=f"edit_location_notes_{selected_location_id}",
+                )
+
+                if st.button("Save location edits", key=f"save_location_edits_{selected_location_id}"):
+                    update_saved_location(
+                        selected_location_id,
+                        {
+                            "name": edit_location_name,
+                            "latitude": edit_latitude,
+                            "longitude": edit_longitude,
+                            "location_type": edit_location_type,
+                            "water_type": edit_water_type,
+                            "default_activities": edit_default_activities,
+                            "manual_water_temp": edit_manual_water_temp,
+                            "notes": edit_notes,
+                        },
+                    )
+
+                    st.success("Location updated.")
+                    st.rerun()
+
+            with st.expander("Danger zone: delete location", expanded=False):
+                st.warning("Deleting a saved location cannot be undone.")
+
+                confirm_delete_location = st.checkbox(
+                    "Yes, delete this saved location",
+                    key=f"confirm_delete_location_{selected_location_id}",
+                )
+
+                if st.button("Delete saved location", key=f"delete_location_{selected_location_id}"):
+                    if confirm_delete_location:
+                        delete_saved_location(selected_location_id)
+                        st.success("Location deleted.")
+                        st.rerun()
+                    else:
+                        st.warning("Check the confirmation box before deleting.")
+
+        st.markdown("---")
+        st.subheader("Default Location by Activity")
+
+        saved_locations_for_defaults = load_saved_locations()
+        activity_location_defaults = load_activity_location_defaults()
+
+        if len(saved_locations_for_defaults) == 0:
+            st.info("Save at least one location before setting activity defaults.")
+
+        else:
+            activity_options_for_defaults = sorted(predictions["activity"].unique())
+
+            location_label_map = {}
+
+            location_options = ["No default"]
+
+            for _, location_row in saved_locations_for_defaults.iterrows():
+                label = (
+                    f"{location_row['name']} "
+                    f"({location_row.get('location_type', 'Location')})"
+                )
+
+                location_options.append(label)
+                location_label_map[label] = int(location_row["id"])
+
+            for activity in activity_options_for_defaults:
+                with st.expander(activity_label(activity), expanded=False):
+                    current_default_location = get_default_location_for_activity(
+                        activity=activity,
+                        defaults_df=activity_location_defaults,
+                        saved_locations_df=saved_locations_for_defaults,
+                    )
+
+                    if current_default_location is not None:
+                        current_label = (
+                            f"{current_default_location['name']} "
+                            f"({current_default_location.get('location_type', 'Location')})"
+                        )
+                    else:
+                        current_label = "No default"
+
+                    if current_label in location_options:
+                        current_index = location_options.index(current_label)
+                    else:
+                        current_index = 0
+
+                    selected_default_location_label = st.selectbox(
+                        "Default location",
+                        options=location_options,
+                        index=current_index,
+                        key=f"default_location_select_{activity}",
+                    )
+
+                    col_a, col_b = st.columns(2)
+
+                    with col_a:
+                        if st.button(
+                            "Save default",
+                            key=f"save_default_location_{activity}",
+                        ):
+                            if selected_default_location_label == "No default":
+                                delete_activity_location_default(activity)
+                                st.success("Default location removed.")
+                            else:
+                                selected_location_id = location_label_map[
+                                    selected_default_location_label
+                                ]
+
+                                save_activity_location_default(
+                                    activity,
+                                    selected_location_id,
+                                )
+
+                                st.success("Default location saved.")
+
+                            st.rerun()
+
+                    with col_b:
+                        if st.button(
+                            "Clear default",
+                            key=f"clear_default_location_{activity}",
+                        ):
+                            delete_activity_location_default(activity)
+                            st.success("Default location cleared.")
+                            st.rerun()
+
+    elif manage_view == "Planned Activities":
+        st.subheader("Planned Activities")
+
+        plans = load_planned_activities()
+
+        if len(plans) == 0:
+            st.info("No planned activities yet.")
+
+        else:
+            plans_with_current = update_plans_with_current_forecast(
+                plans,
+                predictions,
+            )
+
+            st.dataframe(
+                plans_with_current.sort_values("planned_date"),
+                width="stretch",
+            )
+
+            plans_with_current["display_label"] = (
+                plans_with_current["id"].astype(str)
+                + " | "
+                + plans_with_current["planned_date"].astype(str)
+                + " | "
+                + plans_with_current["activity"].astype(str)
+                + " | "
+                + plans_with_current["status"].astype(str)
+            )
+
+            selected_plan_label = st.selectbox(
+                "Choose planned activity to update",
+                options=plans_with_current["display_label"].tolist(),
+                key="manage_selected_plan",
+            )
+
+            selected_plan = plans_with_current[
+                plans_with_current["display_label"] == selected_plan_label
+            ].iloc[0]
+
+            selected_plan_id = int(selected_plan["id"])
+
+            new_plan_status = st.selectbox(
+                "Status",
+                options=PLAN_STATUSES,
+                index=PLAN_STATUSES.index(selected_plan["status"])
+                if selected_plan["status"] in PLAN_STATUSES
+                else 0,
+                key=f"manage_plan_status_{selected_plan_id}",
+            )
+
+            if st.button("Update plan status", key=f"manage_update_plan_status_{selected_plan_id}"):
+                update_planned_activity_status(
+                    selected_plan_id,
+                    new_plan_status,
+                )
+
+                load_planned_activities.clear()
+                st.success("Plan status updated.")
+                st.rerun()
+
+            with st.expander("Danger zone: delete planned activity", expanded=False):
+                confirm_delete_plan = st.checkbox(
+                    "Delete this planned activity",
+                    key=f"manage_confirm_delete_plan_{selected_plan_id}",
+                )
+
+                if st.button("Delete planned activity", key=f"manage_delete_plan_{selected_plan_id}"):
+                    if confirm_delete_plan:
+                        delete_planned_activity(selected_plan_id)
+                        load_planned_activities.clear()
+                        st.success("Planned activity deleted.")
+                        st.rerun()
+                    else:
+                        st.warning("Check the confirmation box before deleting.")
