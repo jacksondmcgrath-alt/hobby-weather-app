@@ -268,6 +268,7 @@ def main():
 
         use_usgs = location.get("use_usgs_water_data")
         usgs_site_id = location.get("usgs_site_id")
+        print(f"use_usgs={location.get('use_usgs_water_data')}, usgs_site_id={location.get('usgs_site_id')}")
 
         if use_usgs and usgs_site_id:
             print(f"Refreshing USGS water data for {name}, site {usgs_site_id}...")
