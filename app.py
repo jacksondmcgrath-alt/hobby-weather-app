@@ -5102,6 +5102,61 @@ def find_best_window(day_df, score_col, min_score=60, min_hours=2):
         "end": end,
     }
 
+def get_ndbc_buoy_data_for_location(location):
+    """
+    Returns cached NDBC buoy data for a saved location dictionary.
+    """
+
+    if location is None:
+        return None
+
+    location_id = location.get("id")
+
+    if location_id is None:
+        return None
+
+    cached = load_environment_cache(
+        location_id=location_id,
+        data_type="ndbc_buoy",
+    )
+
+    if cached is None:
+        return None
+
+    return cached.get("data_json")
+
+
+def format_ndbc_buoy_summary(ndbc_data):
+    """
+    Creates readable summary of NDBC buoy data.
+    """
+
+    if not ndbc_data:
+        return None
+
+    parts = []
+
+    wave_height = ndbc_data.get("wave_height_ft")
+    wind_speed = ndbc_data.get("wind_speed_mph")
+    gust = ndbc_data.get("gust_mph")
+    water_temp = ndbc_data.get("water_temp_f")
+
+    if wave_height is not None:
+        parts.append(f"waves {float(wave_height):.1f} ft")
+
+    if wind_speed is not None:
+        parts.append(f"buoy wind {float(wind_speed):.1f} mph")
+
+    if gust is not None:
+        parts.append(f"gusts {float(gust):.1f} mph")
+
+    if water_temp is not None:
+        parts.append(f"water {float(water_temp):.1f}°F")
+
+    if len(parts) == 0:
+        return None
+
+    return ", ".join(parts)
 
 def hourly_bug_activity_index(row):
     """
@@ -7573,6 +7628,9 @@ with home_tab:
 
             home_nws_alerts = get_nws_alerts_for_location(home_default_location)
 
+            home_ndbc_data = get_ndbc_buoy_data_for_location(home_default_location)
+            home_ndbc_summary = format_ndbc_buoy_summary(home_ndbc_data)
+
             home_chop_summary = get_location_chop_summary(
                 location=home_default_location,
                 wind_speed=top_pick.get("wind_max", 0),
@@ -7626,6 +7684,9 @@ with home_tab:
 
                 if home_usgs_water_summary:
                     st.write(f"**Water data:** {home_usgs_water_summary}")
+
+                if home_ndbc_summary:
+                    st.write(f"**Buoy data:** {home_ndbc_summary}")
 
                 if home_chop_summary_text and top_pick["activity"] in ["Fishing", "Kayaking", "Beach Day"]:
                     st.write(f"**Water chop estimate:** {home_chop_summary_text}")
@@ -7963,6 +8024,9 @@ with planner_tab:
 
                 nws_alerts = get_nws_alerts_for_location(default_location)
 
+                ndbc_data = get_ndbc_buoy_data_for_location(default_location)
+                ndbc_summary = format_ndbc_buoy_summary(ndbc_data)
+
                 chop_summary = get_location_chop_summary(
                     location=default_location,
                     wind_speed=row.get("wind_max", 0),
@@ -7994,6 +8058,9 @@ with planner_tab:
 
                         if usgs_water_summary:
                             st.write(f"**Water data:** {usgs_water_summary}")
+
+                        if ndbc_summary:
+                            st.write(f"**Buoy data:** {ndbc_summary}")
 
                         if chop_summary_text and row["activity"] in ["Fishing", "Kayaking", "Beach Day"]:
                             st.write(f"**Water chop estimate:** {chop_summary_text}")
@@ -8063,6 +8130,9 @@ with planner_tab:
                             if usgs_water_summary:
                                 calendar_description += f"\nWater data: {usgs_water_summary}"
                             
+                            if ndbc_summary:
+                                calendar_description += f"\nBuoy data: {ndbc_summary}"
+
                             if chop_summary_text:
                                 calendar_description += f"\nWater chop estimate: {chop_summary_text}"
 
