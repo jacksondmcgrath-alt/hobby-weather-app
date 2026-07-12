@@ -3,6 +3,13 @@ name: Refresh Environment Cache
 on:
   schedule:
     - cron: "0 * * * *"  # every hour
+
+  push:
+    branches:
+      - main
+    paths:
+      - "jobs/refresh_environment_cache.py"
+      - ".github/workflows/refresh_environment_cache.yml"
   workflow_dispatch:
 
 jobs:
