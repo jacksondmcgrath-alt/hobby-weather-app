@@ -151,6 +151,130 @@ def geocode_place(place):
 
     return results
 
+@st.cache_data(ttl=300)
+def load_environment_cache(location_id, data_type):
+    """
+    Loads cached environmental data for a saved location.
+
+    Example data_type:
+    - nws_alerts
+    - usgs_water
+    """
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("environment_cache")
+            .select("*")
+            .eq("location_id", int(location_id))
+            .eq("data_type", data_type)
+            .limit(1)
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return None
+
+        return rows[0]
+
+    except Exception:
+        return None
+    
+def get_usgs_water_data_for_location(location):
+    """
+    Returns cached USGS water data for a saved location dictionary.
+
+    Returns None if unavailable.
+    """
+
+    if location is None:
+        return None
+
+    location_id = location.get("id")
+
+    if location_id is None:
+        return None
+
+    cached = load_environment_cache(
+        location_id=location_id,
+        data_type="usgs_water",
+    )
+
+    if cached is None:
+        return None
+
+    return cached.get("data_json")
+
+
+def format_usgs_water_summary(usgs_data):
+    """
+    Creates a readable summary of USGS water data.
+    """
+
+    if not usgs_data:
+        return None
+
+    parts = []
+
+    streamflow = usgs_data.get("streamflow_cfs")
+    gauge_height = usgs_data.get("gauge_height_ft")
+    water_temp_f = usgs_data.get("water_temp_f")
+
+    if streamflow is not None:
+        try:
+            parts.append(f"flow {float(streamflow):.0f} cfs")
+        except Exception:
+            pass
+
+    if gauge_height is not None:
+        try:
+            parts.append(f"gauge {float(gauge_height):.2f} ft")
+        except Exception:
+            pass
+
+    if water_temp_f is not None:
+        try:
+            parts.append(f"water {float(water_temp_f):.1f}°F")
+        except Exception:
+            pass
+
+    if len(parts) == 0:
+        return None
+
+    return ", ".join(parts)
+
+def get_nws_alerts_for_location(location):
+    """
+    Returns cached NWS alerts for a saved location dictionary.
+    """
+
+    if location is None:
+        return []
+
+    location_id = location.get("id")
+
+    if location_id is None:
+        return []
+
+    cached = load_environment_cache(
+        location_id=location_id,
+        data_type="nws_alerts",
+    )
+
+    if cached is None:
+        return []
+
+    alerts = cached.get("data_json", [])
+
+    if alerts is None:
+        return []
+
+    return alerts
+
 def extract_coordinates_from_text(text):
     """
     Attempts to extract latitude/longitude from plain text or map URLs.
@@ -7307,6 +7431,11 @@ with home_tab:
                 saved_locations_df=saved_locations_for_home,
             )
 
+            home_usgs_water_data = get_usgs_water_data_for_location(home_default_location)
+            home_usgs_water_summary = format_usgs_water_summary(home_usgs_water_data)
+
+            home_nws_alerts = get_nws_alerts_for_location(home_default_location)
+
             if home_default_location is not None:
                 home_location_name = home_default_location.get("name", "")
             else:
@@ -7350,6 +7479,17 @@ with home_tab:
                 if home_location_name:
                     st.write(f"**Location:** {home_location_name}")
 
+                if home_usgs_water_summary:
+                    st.write(f"**Water data:** {home_usgs_water_summary}")
+
+                if len(home_nws_alerts) > 0:
+                    st.warning("Active weather alerts for this location:")
+
+                    for alert in home_nws_alerts[:2]:
+                        st.write(
+                            f"**{alert.get('event')}** — {alert.get('headline')}"
+                        )
+
                 with metric_col2:
                     st.metric(
                         "Planning Score",
@@ -7370,6 +7510,17 @@ with home_tab:
                     f"bugs {top_pick.get('bug_index', 'N/A')}, "
                     f"water temp est: {top_pick.get('water_temp_est', 'N/A')}°F"
                 )
+
+                if home_usgs_water_data and home_usgs_water_data.get("water_temp_f") is not None:
+                    st.write(
+                        f"**Observed water temp:** "
+                        f"{float(home_usgs_water_data['water_temp_f']):.1f}°F"
+                    )
+                else:
+                    st.write(
+                        f"**Estimated water temp:** "
+                        f"{top_pick.get('water_temp_est', 'N/A')}°F"
+                    )
 
                 st.write(f"**Warnings:** {dashboard_warning_text(top_pick)}")
 
@@ -7659,6 +7810,11 @@ with planner_tab:
                         "location_query": st.session_state.get("location_query"),
                     }
 
+                usgs_water_data = get_usgs_water_data_for_location(default_location)
+                usgs_water_summary = format_usgs_water_summary(usgs_water_data)
+
+                nws_alerts = get_nws_alerts_for_location(default_location)
+
                 with st.container(border=True):
                     card_col1, card_col2 = st.columns([2, 1])
 
@@ -7679,6 +7835,17 @@ with planner_tab:
 
                         if planner_location_name:
                             st.write(f"**Location:** {planner_location_name}")
+
+                        if usgs_water_summary:
+                            st.write(f"**Water data:** {usgs_water_summary}")
+
+                        if len(nws_alerts) > 0:
+                            st.warning("Active weather alerts for this location:")
+
+                            for alert in nws_alerts[:2]:
+                                st.write(
+                                    f"**{alert.get('event')}** — {alert.get('headline')}"
+                                )
 
                         st.write(
                             f"**Planning score:** {row.get('planning_score', 'N/A')}"
@@ -7731,8 +7898,17 @@ with planner_tab:
                                 f"wind {row.get('wind_max', 'N/A')} mph, "
                                 f"rain {row.get('rain_chance', 'N/A')}%, "
                                 f"bugs {row.get('bug_index', 'N/A')}, "
-                                f"water temp est {row.get('water_temp_est', 'N/A')}°F"
+                                f"estimated water temp {row.get('water_temp_est', 'N/A')}°F"
                             )
+
+                            if usgs_water_summary:
+                                calendar_description += f"\nWater data: {usgs_water_summary}"
+                            
+                            if len(nws_alerts) > 0:
+                                calendar_description += "\n\nActive alerts:\n"
+
+                                for alert in nws_alerts[:3]:
+                                    calendar_description += f"- {alert.get('event')}: {alert.get('headline')}\n"
 
                             ics_file = create_calendar_event_ics(
                                 title=calendar_title,
@@ -7813,6 +7989,29 @@ with planner_tab:
                     selected_activity=best["activity"],
                 )
 
+                best_default_location = get_default_location_for_activity(
+                    activity=best["activity"],
+                    defaults_df=activity_location_defaults_for_planner,
+                    saved_locations_df=saved_locations_for_planner,
+                )
+
+                if best_default_location is not None:
+                    best_location_name = best_default_location.get("name", "")
+                else:
+                    best_location_name = ""
+
+                best_usgs_water_data = get_usgs_water_data_for_location(
+                    best_default_location
+                )
+
+                best_usgs_water_summary = format_usgs_water_summary(
+                    best_usgs_water_data
+                )
+
+                best_nws_alerts = get_nws_alerts_for_location(
+                    best_default_location
+                )
+
                 with st.container(border=True):
                     st.markdown(
                         f"### {planner_date}: {activity_label(best['activity'])}"
@@ -7842,6 +8041,20 @@ with planner_tab:
                             recommended_window,
                         )
 
+                    if best_location_name:
+                        st.write(f"**Location:** {best_location_name}")
+
+                    if best_usgs_water_summary:
+                        st.write(f"**Water data:** {best_usgs_water_summary}")
+
+                    if len(best_nws_alerts) > 0:
+                        st.warning("Active weather alerts for this location:")
+
+                        for alert in best_nws_alerts[:2]:
+                            st.write(
+                                f"**{alert.get('event')}** — {alert.get('headline')}"
+                            )
+
                     st.write(f"**Warnings:** {dashboard_warning_text(best)}")
 
                     if len(alternatives) > 0:
@@ -7863,6 +8076,20 @@ with planner_tab:
                                 time_recommendations=time_recommendations,
                                 selected_date=detail_row["date"],
                                 selected_activity=detail_row["activity"],
+                            )
+
+                            detail_default_location = get_default_location_for_activity(
+                                activity=detail_row["activity"],
+                                defaults_df=activity_location_defaults_for_planner,
+                                saved_locations_df=saved_locations_for_planner,
+                            )
+
+                            detail_usgs_water_data = get_usgs_water_data_for_location(
+                                detail_default_location
+                            )
+
+                            detail_usgs_water_summary = format_usgs_water_summary(
+                                detail_usgs_water_data
                             )
 
                             st.markdown(
@@ -7890,6 +8117,14 @@ with planner_tab:
                                 f"rain {detail_row.get('rain_chance', 'N/A')}%, "
                                 f"bugs {detail_row.get('bug_index', 'N/A')}"
                             )
+
+                            if detail_usgs_water_summary:
+                                st.write(f"Water data: {detail_usgs_water_summary}")
+                            else:
+                                st.write(
+                                    f"Estimated water temp: "
+                                    f"{detail_row.get('water_temp_est', 'N/A')}°F"
+                                )
 
                             st.write(detail_row["explanation"])
 
