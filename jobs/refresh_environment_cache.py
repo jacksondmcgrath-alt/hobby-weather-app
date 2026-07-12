@@ -111,6 +111,7 @@ def save_environment_cache(
 
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=ttl_minutes)
+    job_source = os.environ.get("JOB_SOURCE", "local")
 
     row = {
         "location_id": location_id,
