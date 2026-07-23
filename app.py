@@ -13,6 +13,17 @@ import requests
 import streamlit as st
 from supabase import create_client
 
+from config import *
+from utils import *
+from database import *
+from locations import *
+from weather import *
+from scoring import *
+from planner import *
+from scenarios import *
+from ui_helpers import *
+
+
 # =========================
 # App settings
 # =========================
@@ -451,6 +462,97 @@ def search_location_anything(query):
             seen.add(key)
 
     return unique_results[:8]
+
+@st.cache_data(ttl=300)
+def load_weekly_obligations():
+    """
+    Loads weekly recurring obligations from Supabase.
+    """
+
+    columns = [
+        "id",
+        "label",
+        "day_of_week",
+        "start_time",
+        "end_time",
+        "active",
+    ]
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("weekly_obligations")
+            .select("*")
+            .order("day_of_week")
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return pd.DataFrame(columns=columns)
+
+        df = pd.DataFrame(rows)
+
+        for column in columns:
+            if column not in df.columns:
+                df[column] = None
+
+        return df[columns]
+
+    except Exception as e:
+        st.warning("Could not load weekly obligations.")
+        st.write(e)
+        return pd.DataFrame(columns=columns)
+
+
+def save_weekly_obligation(label, day_of_week, start_time, end_time):
+    """
+    Saves a weekly obligation.
+    """
+
+    supabase = get_supabase_client()
+
+    row = {
+        "label": label,
+        "day_of_week": int(day_of_week),
+        "start_time": start_time,
+        "end_time": end_time,
+        "active": True,
+    }
+
+    response = (
+        supabase
+        .table("weekly_obligations")
+        .insert(row)
+        .execute()
+    )
+
+    load_weekly_obligations.clear()
+
+    return response
+
+
+def delete_weekly_obligation(obligation_id):
+    """
+    Deletes a weekly obligation.
+    """
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase
+        .table("weekly_obligations")
+        .delete()
+        .eq("id", obligation_id)
+        .execute()
+    )
+
+    load_weekly_obligations.clear()
+
+    return response
 
 @st.cache_data(ttl=60)
 def load_planned_activities():
@@ -3166,7 +3268,15 @@ def get_supabase_client():
 
     return create_client(supabase_url, supabase_key)
 
-def make_forecast_cache_key(latitude, longitude, forecast_days, manual_water_temp, preferences, include_air_quality):
+def make_forecast_cache_key(
+    latitude,
+    longitude,
+    forecast_days,
+    manual_water_temp,
+    preferences,
+    include_air_quality,
+    obligations_key=None,
+):
     """
     Creates a cache key for forecast results.
 
@@ -3188,7 +3298,8 @@ def make_forecast_cache_key(latitude, longitude, forecast_days, manual_water_tem
         f"{cache_version}_"
         f"{lat_key}_{lon_key}_{forecast_days}_"
         f"{manual_water_temp_key}_{include_air_quality}_"
-        f"{preferences_key}"
+        f"{preferences_key}_"
+        f"{obligations_key}"
     )
 
 
@@ -3455,6 +3566,27 @@ WIND_EXPOSURE_OPTIONS = [
     "Unknown",
 ]
 
+DAY_OF_WEEK_OPTIONS = {
+    "Monday": 0,
+    "Tuesday": 1,
+    "Wednesday": 2,
+    "Thursday": 3,
+    "Friday": 4,
+    "Saturday": 5,
+    "Sunday": 6,
+}
+
+
+DAY_OF_WEEK_LABELS = {
+    0: "Monday",
+    1: "Tuesday",
+    2: "Wednesday",
+    3: "Thursday",
+    4: "Friday",
+    5: "Saturday",
+    6: "Sunday",
+}
+
 def activity_label(activity):
     """
     Returns activity name with icon.
@@ -3614,6 +3746,144 @@ def build_best_by_day_table(predictions, time_recommendations):
 
     return pd.DataFrame(rows)
 
+def build_outdoor_outlook(predictions):
+    """
+    Builds short natural-language outlook items for the current forecast period.
+    """
+
+    outlook = []
+
+    if predictions is None or len(predictions) == 0:
+        return outlook
+
+    df = predictions.copy()
+
+    sort_column = (
+        "planning_score"
+        if "planning_score" in df.columns
+        else "predicted_score"
+    )
+
+    # Best overall
+    best_overall = df.sort_values(
+        sort_column,
+        ascending=False,
+    ).iloc[0]
+
+    outlook.append(
+        f"Best overall opportunity: {activity_label(best_overall['activity'])} "
+        f"on {best_overall['date']} with planning score "
+        f"{best_overall.get('planning_score', best_overall['predicted_score'])}."
+    )
+
+    # Best water activity
+    water_activities = [
+        "Fishing",
+        "Kayaking",
+        "Beach Day",
+    ]
+
+    water_df = df[
+        df["activity"].isin(water_activities)
+    ].copy()
+
+    if len(water_df) > 0:
+        best_water = water_df.sort_values(
+            sort_column,
+            ascending=False,
+        ).iloc[0]
+
+        outlook.append(
+            f"Best water activity: {activity_label(best_water['activity'])} "
+            f"on {best_water['date']}."
+        )
+
+    # Best land activity
+    land_activities = [
+        "Running",
+        "Camping",
+        "Disc Golf",
+        "Tennis",
+    ]
+
+    land_df = df[
+        df["activity"].isin(land_activities)
+    ].copy()
+
+    if len(land_df) > 0:
+        best_land = land_df.sort_values(
+            sort_column,
+            ascending=False,
+        ).iloc[0]
+
+        outlook.append(
+            f"Best land activity: {activity_label(best_land['activity'])} "
+            f"on {best_land['date']}."
+        )
+
+    # Best fishing target
+    fishing_df = df[
+        df["activity"] == "Fishing"
+    ].copy()
+
+    best_targets = []
+
+    for _, fishing_row in fishing_df.iterrows():
+        species_breakdown = fishing_row.get("species_breakdown", [])
+
+        if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+            best_species = species_breakdown[0]
+
+            best_targets.append({
+                "date": fishing_row["date"],
+                "species": best_species.get("species"),
+                "score": best_species.get("score"),
+            })
+
+    if len(best_targets) > 0:
+        best_targets_df = pd.DataFrame(best_targets)
+        best_target = best_targets_df.sort_values(
+            "score",
+            ascending=False,
+        ).iloc[0]
+
+        outlook.append(
+            f"Best fishing target: {best_target['species']} "
+            f"on {best_target['date']}."
+        )
+
+    # Low-confidence warning
+    if "forecast_confidence" in df.columns:
+        confidence_values = pd.to_numeric(
+            df["forecast_confidence"],
+            errors="coerce",
+        )
+
+        low_confidence_count = int(
+            (confidence_values < 55).sum()
+        )
+
+        if low_confidence_count > 0:
+            outlook.append(
+                "Some later-week plans have lower forecast confidence. "
+                "Recheck before committing."
+            )
+
+    # Weather warning summary
+    if "storm_risk" in df.columns:
+        risky_rows = df[
+            ~df["storm_risk"].fillna("").isin(
+                ["", "Low storm risk"]
+            )
+        ]
+
+        if len(risky_rows) > 0:
+            outlook.append(
+                "There may be storm or weather-risk periods this week. "
+                "Check alerts before outdoor plans."
+            )
+
+    return outlook
 
 def get_top_activities_for_date(predictions, forecast_date, n=3):
     """
@@ -5019,13 +5289,86 @@ def format_time_for_window(timestamp):
 
     return timestamp.strftime("%I:%M %p").lstrip("0")
 
-
-def find_best_window(day_df, score_col, min_score=60, min_hours=2):
+def time_is_available(timestamp, obligations_df):
     """
-    Finds the best continuous time window.
+    Returns True if timestamp does not fall inside an active weekly obligation.
 
-    It looks for consecutive hours where the score is at least min_score.
-    If it cannot find a multi-hour window, it falls back to the single best hour.
+    Assumes obligations are recurring weekly blocks.
+    """
+
+    if obligations_df is None or len(obligations_df) == 0:
+        return True
+
+    timestamp = pd.to_datetime(timestamp)
+
+    day_of_week = timestamp.weekday()
+    time_string = timestamp.strftime("%H:%M")
+
+    working_df = obligations_df.copy()
+
+    if "active" in working_df.columns:
+        working_df = working_df[
+            working_df["active"].fillna(True).astype(bool)
+        ]
+
+    if len(working_df) == 0:
+        return True
+
+    day_obligations = working_df[
+        working_df["day_of_week"].astype(int) == int(day_of_week)
+    ]
+
+    for _, obligation in day_obligations.iterrows():
+        start_time = str(obligation["start_time"])
+        end_time = str(obligation["end_time"])
+
+        # Normal same-day obligation, e.g. 08:00 to 17:00
+        if start_time <= end_time:
+            if start_time <= time_string < end_time:
+                return False
+
+        # Overnight obligation, e.g. 22:00 to 02:00
+        else:
+            if time_string >= start_time or time_string < end_time:
+                return False
+
+    return True
+
+
+def filter_available_times(df, obligations_df):
+    """
+    Filters an hourly dataframe to only times outside weekly obligations.
+    """
+
+    if df is None or len(df) == 0:
+        return df
+
+    if obligations_df is None or len(obligations_df) == 0:
+        return df
+
+    filtered = df.copy()
+
+    filtered["is_available"] = filtered["time"].apply(
+        lambda value: time_is_available(value, obligations_df)
+    )
+
+    return filtered[
+        filtered["is_available"]
+    ].copy()
+
+def find_best_window(day_df, score_col, min_score=60, min_hours=2, max_hours=3):
+    """
+    Finds the best short continuous time window.
+
+    This is designed to avoid huge windows like 6 AM–10 PM.
+    It returns the best 2–3 hour window by default.
+
+    Parameters:
+    - day_df: hourly dataframe for one day
+    - score_col: column containing hourly score
+    - min_score: minimum acceptable hourly score
+    - min_hours: minimum number of hours in window
+    - max_hours: maximum number of hours in window
     """
 
     if len(day_df) == 0:
@@ -5038,68 +5381,97 @@ def find_best_window(day_df, score_col, min_score=60, min_hours=2):
 
     df = day_df.sort_values("time").copy()
 
-    good = df[df[score_col] >= min_score].copy()
+    # Only keep rows that are at least acceptable
+    df = df[df[score_col] >= min_score].copy()
 
-    segments = []
-    current_segment = []
-    last_time = None
+    if len(df) == 0:
+        # Fallback: best single hour from original day_df
+        fallback_df = day_df.sort_values("time").copy()
 
-    for _, row in good.iterrows():
-        current_time = row["time"]
+        if len(fallback_df) == 0:
+            return {
+                "window": "Not available",
+                "score": None,
+                "start": None,
+                "end": None,
+            }
 
-        if last_time is None:
-            current_segment = [row]
+        best_index = fallback_df[score_col].idxmax()
+        best_row = fallback_df.loc[best_index]
 
-        elif current_time - last_time <= pd.Timedelta(hours=1, minutes=5):
-            current_segment.append(row)
-
-        else:
-            if len(current_segment) > 0:
-                segments.append(pd.DataFrame(current_segment))
-
-            current_segment = [row]
-
-        last_time = current_time
-
-    if len(current_segment) > 0:
-        segments.append(pd.DataFrame(current_segment))
-
-    # Keep only useful windows
-    usable_segments = [
-        segment for segment in segments
-        if len(segment) >= min_hours
-    ]
-
-    if len(usable_segments) > 0:
-        best_segment = max(
-            usable_segments,
-            key=lambda segment: segment[score_col].mean()
-        )
-
-        start = best_segment["time"].iloc[0]
-        end = best_segment["time"].iloc[-1] + pd.Timedelta(hours=1)
-        average_score = round(best_segment[score_col].mean())
+        start = best_row["time"]
+        end = start + pd.Timedelta(hours=1)
 
         return {
             "window": f"{format_time_for_window(start)}–{format_time_for_window(end)}",
-            "score": average_score,
+            "score": round(best_row[score_col]),
             "start": start,
             "end": end,
         }
 
-    # Fallback: best single hour
-    best_index = df[score_col].idxmax()
-    best_row = df.loc[best_index]
+    candidate_windows = []
 
-    start = best_row["time"]
-    end = start + pd.Timedelta(hours=1)
-    score = round(best_row[score_col])
+    times = df["time"].tolist()
+
+    for start_time in times:
+        for duration_hours in range(min_hours, max_hours + 1):
+            end_time = start_time + pd.Timedelta(hours=duration_hours)
+
+            window_rows = df[
+                (df["time"] >= start_time) &
+                (df["time"] < end_time)
+            ].copy()
+
+            # We expect roughly one row per hour.
+            if len(window_rows) < min_hours:
+                continue
+
+            # Make sure the window is reasonably continuous.
+            expected_hours = duration_hours
+            if len(window_rows) < expected_hours:
+                continue
+
+            average_score = window_rows[score_col].mean()
+            min_window_score = window_rows[score_col].min()
+
+            candidate_windows.append({
+                "start": start_time,
+                "end": end_time,
+                "average_score": average_score,
+                "min_score": min_window_score,
+                "duration": duration_hours,
+            })
+
+    if len(candidate_windows) == 0:
+        best_index = df[score_col].idxmax()
+        best_row = df.loc[best_index]
+
+        start = best_row["time"]
+        end = start + pd.Timedelta(hours=1)
+
+        return {
+            "window": f"{format_time_for_window(start)}–{format_time_for_window(end)}",
+            "score": round(best_row[score_col]),
+            "start": start,
+            "end": end,
+        }
+
+    # Prefer highest average score, then higher minimum score, then shorter window.
+    best_window = sorted(
+        candidate_windows,
+        key=lambda item: (
+            item["average_score"],
+            item["min_score"],
+            -item["duration"],
+        ),
+        reverse=True,
+    )[0]
 
     return {
-        "window": f"{format_time_for_window(start)}–{format_time_for_window(end)}",
-        "score": score,
-        "start": start,
-        "end": end,
+        "window": f"{format_time_for_window(best_window['start'])}–{format_time_for_window(best_window['end'])}",
+        "score": round(best_window["average_score"]),
+        "start": best_window["start"],
+        "end": best_window["end"],
     }
 
 def get_ndbc_buoy_data_for_location(location):
@@ -5610,7 +5982,7 @@ def score_beach_hour(row):
 
     return round(clamp_score(final_score))
 
-def build_time_recommendations(hourly_df, sun_times):
+def build_time_recommendations(hourly_df, sun_times, obligations_df=None):
     """
     Builds best time windows for:
     - Fishing
@@ -5634,6 +6006,11 @@ def build_time_recommendations(hourly_df, sun_times):
         (df["hour"] >= 5) &
         (df["hour"] <= 22)
     ].copy()
+
+    fishing_df = filter_available_times(
+        fishing_df,
+        obligations_df,
+    )
 
     fishing_df["Fishing Time Score"] = fishing_df.apply(
         score_fishing_hour,
@@ -5663,6 +6040,11 @@ def build_time_recommendations(hourly_df, sun_times):
         running_df["Running Light Score"] > 0
     ].copy()
 
+    running_df = filter_available_times(
+        running_df,
+        obligations_df,
+    )
+
     running_df["Running Time Score"] = running_df.apply(
         score_running_hour,
         axis=1,
@@ -5690,6 +6072,11 @@ def build_time_recommendations(hourly_df, sun_times):
     daylight_df = daylight_df[
         daylight_df["Daylight Score"] > 0
     ].copy()
+
+    daylight_df = filter_available_times(
+        daylight_df,
+        obligations_df,
+    )
 
     daylight_df["Kayaking Time Score"] = daylight_df.apply(
         score_kayaking_hour,
@@ -5731,6 +6118,7 @@ def build_time_recommendations(hourly_df, sun_times):
             score_col="Fishing Time Score",
             min_score=60,
             min_hours=2,
+            max_hours=3,
         )
 
         row["Best Fishing Window"] = fishing_window["window"]
@@ -5746,6 +6134,7 @@ def build_time_recommendations(hourly_df, sun_times):
             score_col="Running Time Score",
             min_score=60,
             min_hours=2,
+            max_hours=3,
         )
 
         row["Best Running Window"] = running_window["window"]
@@ -5778,6 +6167,7 @@ def build_time_recommendations(hourly_df, sun_times):
             score_col="Kayaking Time Score",
             min_score=60,
             min_hours=2,
+            max_hours=3,
         )
 
         row["Best Kayaking Window"] = kayaking_window["window"]
@@ -5793,6 +6183,7 @@ def build_time_recommendations(hourly_df, sun_times):
             score_col="Disc Golf Time Score",
             min_score=60,
             min_hours=2,
+            max_hours=3,
         )
 
         row["Best Disc Golf Window"] = disc_golf_window["window"]
@@ -5808,6 +6199,7 @@ def build_time_recommendations(hourly_df, sun_times):
             score_col="Tennis Time Score",
             min_score=60,
             min_hours=2,
+            max_hours=3,
         )
 
         row["Best Tennis Window"] = tennis_window["window"]
@@ -5822,7 +6214,8 @@ def build_time_recommendations(hourly_df, sun_times):
             beach_day,
             score_col="Beach Day Time Score",
             min_score=60,
-            min_hours=2,
+            min_hours=3,
+            max_hours=5,
         )
 
         row["Best Beach Day Window"] = beach_window["window"]
@@ -6191,7 +6584,6 @@ def save_prediction_history(predictions):
     except Exception as e:
         st.warning("Could not save prediction history to Supabase.")
         st.write(e)
-
 
 def find_saved_prediction(predictions, selected_date, selected_activity):
     """
@@ -6754,6 +7146,21 @@ with st.spinner("Loading forecast and scoring activities..."):
     try:
         force_refresh = st.session_state.pop("force_refresh_forecast", False)
 
+        weekly_obligations = load_weekly_obligations()
+
+        if len(weekly_obligations) > 0:
+            obligations_key = weekly_obligations[
+                [
+                    "label",
+                    "day_of_week",
+                    "start_time",
+                    "end_time",
+                    "active",
+                ]
+            ].to_dict(orient="records")
+        else:
+            obligations_key = []
+
         forecast_cache_key = make_forecast_cache_key(
             latitude=latitude,
             longitude=longitude,
@@ -6761,6 +7168,7 @@ with st.spinner("Loading forecast and scoring activities..."):
             manual_water_temp=manual_water_temp,
             preferences=preferences,
             include_air_quality=include_air_quality,
+            obligations_key=obligations_key,
         )
 
         if not force_refresh:
@@ -6805,9 +7213,12 @@ with st.spinner("Loading forecast and scoring activities..."):
                     days=forecast_days,
                 )
 
+                weekly_obligations = load_weekly_obligations()
+
                 time_recommendations = build_time_recommendations(
                     hourly_df=hourly_weather_for_times,
                     sun_times=sun_times,
+                    obligations_df=weekly_obligations,
                 )
 
                 save_forecast_cache(
@@ -7801,6 +8212,16 @@ with home_tab:
 
                 except Exception:
                     st.caption("Calendar export is not available for this recommendation.")
+
+                st.subheader("Outdoor Outlook")
+
+                outlook_items = build_outdoor_outlook(predictions)
+
+                if len(outlook_items) == 0:
+                    st.info("No outdoor outlook available yet.")
+                else:
+                    for item in outlook_items:
+                        st.info(item)
 
             # -------------------------
             # Next best options
@@ -8808,6 +9229,7 @@ with manage_tab:
             "Activity Logs",
             "Saved Locations",
             "Planned Activities",
+            "Weekly Schedule",
         ],
         horizontal=True,
         key="manage_view_selector",
@@ -9097,6 +9519,113 @@ with manage_tab:
 
                     else:
                         st.warning("Check the confirmation box before deleting.")
+
+    elif manage_view == "Weekly Schedule":
+        st.subheader("Weekly Schedule / Obligations")
+
+        st.write(
+            "Add recurring times when you are unavailable. "
+            "Suggested activity windows will avoid these times."
+        )
+
+        with st.form("add_weekly_obligation_form"):
+            obligation_label = st.text_input(
+                "Label",
+                placeholder="Example: Work, Class, Practice",
+            )
+
+            obligation_day_label = st.selectbox(
+                "Day",
+                options=list(DAY_OF_WEEK_OPTIONS.keys()),
+            )
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                obligation_start = st.time_input("Start time")
+
+            with col2:
+                obligation_end = st.time_input("End time")
+
+            submitted_obligation = st.form_submit_button("Save obligation")
+
+            if submitted_obligation:
+                if obligation_label.strip() == "":
+                    st.error("Please enter a label.")
+                else:
+                    save_weekly_obligation(
+                        label=obligation_label,
+                        day_of_week=DAY_OF_WEEK_OPTIONS[obligation_day_label],
+                        start_time=obligation_start.strftime("%H:%M"),
+                        end_time=obligation_end.strftime("%H:%M"),
+                    )
+
+                    st.success("Weekly obligation saved.")
+                    st.rerun()
+
+        obligations = load_weekly_obligations()
+
+        if len(obligations) == 0:
+            st.info("No weekly obligations saved.")
+
+        else:
+            display_obligations = obligations.copy()
+
+            display_obligations["day"] = display_obligations["day_of_week"].apply(
+                lambda value: DAY_OF_WEEK_LABELS.get(int(value), str(value))
+            )
+
+            st.dataframe(
+                display_obligations[
+                    [
+                        "id",
+                        "label",
+                        "day",
+                        "start_time",
+                        "end_time",
+                        "active",
+                    ]
+                ],
+                width="stretch",
+            )
+
+            display_obligations["display_label"] = (
+                display_obligations["id"].astype(str)
+                + " | "
+                + display_obligations["label"].astype(str)
+                + " | "
+                + display_obligations["day"].astype(str)
+                + " | "
+                + display_obligations["start_time"].astype(str)
+                + "-"
+                + display_obligations["end_time"].astype(str)
+            )
+
+            selected_obligation_label = st.selectbox(
+                "Choose obligation to delete",
+                options=display_obligations["display_label"].tolist(),
+                key="delete_obligation_selectbox",
+            )
+
+            selected_obligation = display_obligations[
+                display_obligations["display_label"] == selected_obligation_label
+            ].iloc[0]
+
+            confirm_delete_obligation = st.checkbox(
+                "Yes, delete this weekly obligation",
+                key=f"confirm_delete_obligation_{selected_obligation['id']}",
+            )
+
+            if st.button(
+                "Delete selected obligation",
+                key=f"delete_obligation_{selected_obligation['id']}",
+            ):
+                if confirm_delete_obligation:
+                    delete_weekly_obligation(int(selected_obligation["id"]))
+                    st.success("Obligation deleted.")
+                    st.rerun()
+                else:
+                    st.warning("Check the confirmation box before deleting.")
 
     elif manage_view == "Saved Locations":
         st.subheader("Saved Locations")
