@@ -1,13 +1,8 @@
-import os
-import random
 import json
-import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pandas as pd
-import requests
 import streamlit as st
-from supabase import create_client
 
 from config import *
 from utils import *
@@ -25,110 +20,6 @@ st.set_page_config(
     page_icon="🌤️",
     layout="wide",
 )
-
-
-# =========================
-# Saved settings and location search
-# =========================
-
-def delete_saved_location(location_id):
-    """
-    Deletes a saved location.
-    """
-
-    supabase = get_supabase_client()
-
-    response = (
-        supabase
-        .table("saved_locations")
-        .delete()
-        .eq("id", location_id)
-        .execute()
-    )
-
-    load_saved_locations.clear()
-
-    return response
-
-@st.cache_resource
-def get_supabase_client():
-    """
-    Connects to Supabase using Streamlit secrets.
-    """
-
-    supabase_url = st.secrets["SUPABASE_URL"]
-    supabase_key = st.secrets["SUPABASE_KEY"]
-
-    return create_client(supabase_url, supabase_key)
-
-def get_best_activity_for_date(predictions, forecast_date):
-    """
-    Returns the highest scoring activity for one date.
-    """
-
-    day_predictions = predictions[
-        predictions["date"] == forecast_date
-    ].copy()
-
-    if len(day_predictions) == 0:
-        return None
-
-    best_index = day_predictions["predicted_score"].idxmax()
-
-    return day_predictions.loc[best_index]
-
-
-def build_best_by_day_table(predictions, time_recommendations):
-    """
-    Builds a simple table showing the best activity for each date.
-    """
-
-    rows = []
-
-    for forecast_date in sorted(predictions["date"].unique()):
-        best_row = get_best_activity_for_date(predictions, forecast_date)
-
-        if best_row is None:
-            continue
-
-        recommended_window, window_score = get_recommended_window_for_activity(
-            time_recommendations=time_recommendations,
-            selected_date=forecast_date,
-            selected_activity=best_row["activity"],
-        )
-
-        rows.append({
-            "Date": forecast_date,
-            "Best Activity": best_row["activity"],
-            "Score": best_row["predicted_score"],
-            "Label": best_row["label"],
-            "Recommended Window": recommended_window,
-            "Weather Snapshot": (
-                f"{best_row.get('avg_temp', 'N/A')}°F, "
-                f"wind {best_row.get('wind_max', 'N/A')} mph, "
-                f"rain {best_row.get('rain_chance', 'N/A')}%"
-            ),
-        })
-
-    return pd.DataFrame(rows)
-
-def get_top_activities_for_date(predictions, forecast_date, n=3):
-    """
-    Returns top N activities for a date.
-
-    Uses planning_score if available, otherwise predicted_score.
-    """
-
-    day_predictions = predictions[
-        predictions["date"] == forecast_date
-    ].copy()
-
-    sort_column = "planning_score" if "planning_score" in day_predictions.columns else "predicted_score"
-
-    return day_predictions.sort_values(
-        sort_column,
-        ascending=False,
-    ).head(n)
 
 # =========================
 # Streamlit user interface
@@ -168,8 +59,8 @@ with st.sidebar.expander("📍 Location", expanded=True):
         st.session_state["new_location_search_results"] = [
             {
                 "label": "Current forecast location",
-                "latitude": latitude,
-                "longitude": longitude,
+                "latitude": st.session_state.get("latitude", DEFAULT_SETTINGS["latitude"]),
+                "longitude": st.session_state.get("longitude", DEFAULT_SETTINGS["longitude"]),
                 "source": "Current app location",
             }
         ]
@@ -710,7 +601,13 @@ with scenario_tab:
             "fire_danger": "Fire danger",
         }
 
-        scenario_mode = "basic"
+        scenario_mode = st.selectbox(
+            "Scenario detail level",
+            options=["basic", "advanced"],
+            index=0,
+            help="Basic shows the main factors. Advanced can include more context later.",
+            key="scenario_mode_select",
+        )
 
         display_fields = get_shown_features_for_scenario(
             selected_scenario_activity,
@@ -741,14 +638,6 @@ with scenario_tab:
             value=5,
             help="1 = terrible, 10 = excellent",
             key="scenario_rating_slider",
-        )
-
-        scenario_mode = st.selectbox(
-            "Scenario detail level",
-            options=["basic", "advanced"],
-            index=0,
-            help="Basic shows the main factors. Advanced can include more context later.",
-            key="scenario_mode_select",
         )
 
         rater_confidence = st.slider(
@@ -814,9 +703,16 @@ with scenario_tab:
 
                     st.success("Scenario rating saved.")
 
-                    st.session_state["current_scenario"] = generate_random_scenario(
-                        selected_scenario_activity
-                    )
+                    if scenario_source == "Historical weather":
+                        st.session_state["current_scenario"] = generate_historical_scenario(
+                            selected_scenario_activity,
+                            latitude,
+                            longitude,
+                        )
+                    else:
+                        st.session_state["current_scenario"] = generate_random_scenario(
+                            selected_scenario_activity
+                        )
 
                     st.session_state["current_scenario_activity"] = selected_scenario_activity
 
@@ -1503,12 +1399,27 @@ with home_tab:
                         f"water temp est {top_pick.get('water_temp_est', 'N/A')}°F"
                     )
 
+                    if home_usgs_water_summary:
+                        home_calendar_description += f"\nWater data: {home_usgs_water_summary}"
+
+                    if home_ndbc_summary:
+                        home_calendar_description += f"\nBuoy data: {home_ndbc_summary}"
+
+                    if home_chop_summary_text:
+                        home_calendar_description += f"\nWater chop estimate: {home_chop_summary_text}"
+
+                    if len(home_nws_alerts) > 0:
+                        home_calendar_description += "\n\nActive alerts:\n"
+
+                        for alert in home_nws_alerts[:3]:
+                            home_calendar_description += f"- {alert.get('event')}: {alert.get('headline')}\n"
+
                     home_ics_file = create_calendar_event_ics(
                         title=home_calendar_title,
                         start_dt=home_start_dt,
                         end_dt=home_end_dt,
                         description=home_calendar_description,
-                        location="",
+                        location=home_location_name,
                     )
 
                     st.download_button(
@@ -1522,15 +1433,15 @@ with home_tab:
                 except Exception:
                     st.caption("Calendar export is not available for this recommendation.")
 
-                st.subheader("Outdoor Outlook")
+            st.subheader("Outdoor Outlook")
 
-                outlook_items = build_outdoor_outlook(predictions)
+            outlook_items = build_outdoor_outlook(predictions)
 
-                if len(outlook_items) == 0:
-                    st.info("No outdoor outlook available yet.")
-                else:
-                    for item in outlook_items:
-                        st.info(item)
+            if len(outlook_items) == 0:
+                st.info("No outdoor outlook available yet.")
+            else:
+                for item in outlook_items:
+                    st.info(item)
 
             # -------------------------
             # Next best options
