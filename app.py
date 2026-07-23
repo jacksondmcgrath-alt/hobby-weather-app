@@ -1,12 +1,9 @@
+import re
 import os
 import random
 import json
-import time
-import math
 import re
 from datetime import datetime, timedelta
-from urllib import response
-from urllib.parse import urlparse, parse_qs, unquote
 
 import pandas as pd
 import requests
@@ -24,19 +21,6 @@ from scenarios import *
 from ui_helpers import *
 
 
-# =========================
-# App settings
-# =========================
-
-FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
-GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
-ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
-
-LOG_FILE = "activity_log.csv"
-SETTINGS_FILE = "preferences.json"
-PREDICTION_HISTORY_FILE = "prediction_history.csv"
-
 st.set_page_config(
     page_title="Hobby Weather Scorer",
     page_icon="🌤️",
@@ -47,28 +31,6 @@ st.set_page_config(
 # =========================
 # Saved settings and location search
 # =========================
-
-DEFAULT_SETTINGS = {
-    "latitude": 42.2808,
-    "longitude": -83.7430,
-    "location_query": "Ann Arbor, Michigan",
-    "forecast_days": 7,
-    "use_manual_water_temp": False,
-    "manual_water_temp": 65,
-    "phone_friendly_view": True,
-    "include_air_quality": False,
-
-    # Preference sliders
-    "bug_tolerance": 5,
-    "rain_caution": 6,
-    "fishing_bug_boost": 6,
-    "fishing_wind_tolerance": 6,
-    "camping_bug_sensitivity": 8,
-    "running_wind_sensitivity": 6,
-    "running_heat_sensitivity": 7,
-    "kayaking_wind_caution": 8,
-    "disc_golf_wind_sensitivity": 6,
-}
 
 
 def load_settings():
@@ -1743,106 +1705,6 @@ def show_accuracy_charts(activity_log):
         """
     )
 
-def is_missing_scalar(value):
-    """
-    Safely checks whether a scalar value is missing.
-
-    Avoids calling pd.isna() on lists/dicts, which causes ambiguity errors.
-    """
-
-    if value is None:
-        return True
-
-    if isinstance(value, (list, dict, tuple, set)):
-        return False
-
-    try:
-        result = pd.isna(value)
-
-        try:
-            return bool(result)
-        except Exception:
-            return False
-
-    except Exception:
-        return False
-
-
-def clean_json_value(value):
-    """
-    Converts values into JSON-safe values.
-
-    Supabase JSONB cannot store:
-    - NaN
-    - Infinity
-    - pandas NA/NaT
-    - numpy scalar values
-    """
-
-    if value is None:
-        return None
-
-    if isinstance(value, dict):
-        return {
-            str(key): clean_json_value(item)
-            for key, item in value.items()
-        }
-
-    if isinstance(value, list):
-        return [
-            clean_json_value(item)
-            for item in value
-        ]
-
-    if isinstance(value, tuple):
-        return [
-            clean_json_value(item)
-            for item in value
-        ]
-
-    if isinstance(value, set):
-        return [
-            clean_json_value(item)
-            for item in value
-        ]
-
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-
-    if isinstance(value, datetime):
-        return value.isoformat()
-
-    # Convert numpy/pandas scalar types to Python scalar types
-    if hasattr(value, "item"):
-        try:
-            return clean_json_value(value.item())
-        except Exception:
-            pass
-
-    if is_missing_scalar(value):
-        return None
-
-    if isinstance(value, float):
-        if math.isnan(value) or math.isinf(value):
-            return None
-
-    # Final fallback for unusual non-JSON types
-    if isinstance(value, (str, int, bool)):
-        return value
-
-    if isinstance(value, float):
-        return value
-
-    return str(value)
-
-
-def dataframe_to_json_records(df):
-    """
-    Converts a DataFrame to JSON-safe records.
-    """
-
-    records = df.to_dict(orient="records")
-    return clean_json_value(records)
 
 def build_tuning_suggestions(activity_log):
     """
@@ -1943,131 +1805,6 @@ def build_tuning_suggestions(activity_log):
         suggestions.append("No strong tuning suggestions yet. Keep logging more activities.")
 
     return suggestions
-
-FACTOR_METRIC_MAP = {
-    "temperature": "temp_avg",
-    "wind_speed": "wind_max",
-    "wind_gust": "gust_max",
-    "rain_chance": "precip_probability_max",
-    "humidity": "humidity_avg",
-    "cloud_cover": "cloud_avg",
-    "pressure_change": "pressure_change",
-    "bug_index": "bug_activity_index",
-    "water_temp": "estimated_water_temp",
-    "storm_safety": "storm_safety_score",
-    "ground_dryness": "ground_dryness_score",
-    "dew_point": "dew_point_max",
-    "aqi": "aqi_max",
-    "uv_index": "uv_index_max",
-}
-
-
-HARDCODED_ACTIVITIES = {
-    "Fishing",
-    "Camping",
-    "Running",
-    "Kayaking",
-    "Disc Golf",
-}
-
-ACTIVITY_SCENARIO_FIELDS = {
-    "Fishing": [
-        "temperature",
-        "wind_speed",
-        "rain_chance",
-        "pressure_change",
-        "bug_index",
-        "water_temp",
-        "storm_safety",
-    ],
-    "Camping": [
-        "temperature",
-        "wind_speed",
-        "wind_gust",
-        "rain_chance",
-        "humidity",
-        "bug_index",
-        "storm_safety",
-    ],
-    "Running": [
-        "temperature",
-        "wind_speed",
-        "rain_chance",
-        "dew_point",
-        "aqi",
-        "cloud_cover",
-        "storm_safety",
-    ],
-    "Kayaking": [
-        "temperature",
-        "wind_speed",
-        "wind_gust",
-        "rain_chance",
-        "water_temp",
-        "storm_safety",
-    ],
-    "Disc Golf": [
-        "temperature",
-        "wind_speed",
-        "rain_chance",
-        "bug_index",
-        "cloud_cover",
-        "storm_safety",
-    ],
-    "Tennis": [
-        "temperature",
-        "wind_speed",
-        "rain_chance",
-        "cloud_cover",
-        "storm_safety",
-    ],
-    "Beach Day": [
-        "temperature",
-        "wind_speed",
-        "rain_chance",
-        "cloud_cover",
-        "water_temp",
-        "uv_index",
-        "storm_safety",
-    ],
-}
-
-
-SCENARIO_RANGES = {
-    "temperature": [25, 95],
-    "wind_speed": [0, 25],
-    "wind_gust": [0, 40],
-    "rain_chance": [0, 100],
-    "humidity": [25, 100],
-    "cloud_cover": [0, 100],
-    "pressure_change": [-12, 12],
-    "bug_index": [0, 100],
-    "water_temp": [35, 85],
-    "storm_safety": [20, 100],
-    "dew_point": [30, 75],
-    "aqi": [0, 160],
-    "uv_index": [0, 10],
-}
-
-SCENARIO_RANGES.update({
-    "visibility": [0.5, 10],
-    "wind_direction": [0, 359],
-    "rain_amount": [0, 1.5],
-    "recent_rain_24h": [0, 1.5],
-    "recent_rain_72h": [0, 3.0],
-    "overnight_low": [20, 75],
-    "month": [1, 12],
-    "daylight_hours": [8, 16],
-    "moon_phase": [0, 1],
-    "moon_illumination": [0, 100],
-    "pollen_index": [0, 12],
-    "river_flow_cfs": [50, 5000],
-    "gauge_height": [1, 15],
-    "flow_trend": [-3, 3],
-    "wave_height_ft": [0, 8],
-    "rip_current_risk": [0, 10],
-    "fire_danger": [0, 10],
-})
 
 def season_from_month(month):
     """
@@ -2761,29 +2498,6 @@ def get_rule_number(rule, column_name, default=None):
     except Exception:
         return default
 
-
-def high_is_good_score(value, ideal_min, bad_at):
-    """
-    Scores something where higher is better.
-
-    Example:
-    storm safety:
-    85+ is good.
-    40 or lower is bad.
-    """
-
-    if pd.isna(value):
-        return 50
-
-    if value >= ideal_min:
-        return 100
-
-    if value <= bad_at:
-        return 0
-
-    return 100 * (value - bad_at) / (ideal_min - bad_at)
-
-
 def score_value_from_rule(value, rule):
     """
     Scores one weather/environment value using one baseline rule.
@@ -3017,34 +2731,6 @@ def build_accuracy_report(activity_log):
         )
 
     return summary, insights
-
-def get_json_with_retries(url, params, timeout=10, retries=2, backoff_seconds=1):
-    """
-    Gets JSON from an API with simple retries.
-
-    This helps avoid crashes from temporary connection resets.
-    """
-
-    last_error = None
-
-    for attempt in range(retries + 1):
-        try:
-            response = requests.get(
-                url,
-                params=params,
-                timeout=timeout,
-            )
-
-            response.raise_for_status()
-            return response.json()
-
-        except requests.exceptions.RequestException as e:
-            last_error = e
-
-            if attempt < retries:
-                time.sleep(backoff_seconds * (attempt + 1))
-            else:
-                raise last_error
             
 def get_weekend_predictions(predictions):
     """
@@ -3389,9 +3075,6 @@ def save_forecast_cache(
         st.warning("Could not save forecast cache.")
         st.write(e)
 
-def clamp_score(score):
-    return max(0, min(100, score))
-
 def forecast_lead_time_score(date_value):
     """
     Scores forecast reliability based mostly on how far away the date is.
@@ -3529,63 +3212,6 @@ def add_forecast_confidence(predictions):
 
     return df
 
-ACTIVITY_ICONS = {
-    "Fishing": "🎣",
-    "Camping": "⛺",
-    "Running": "🏃",
-    "Kayaking": "🛶",
-    "Disc Golf": "🥏",
-    "Tennis": "🎾",
-    "Beach Day": "🏖️",
-}
-
-PLAN_STATUSES = [
-    "Planned",
-    "Maybe",
-    "Completed",
-    "Canceled",
-]
-
-WATER_BODY_SIZE_OPTIONS = [
-    "Not applicable",
-    "Pond",
-    "Small lake",
-    "Medium lake",
-    "Large lake",
-    "Great Lake",
-    "River",
-    "Unknown",
-]
-
-
-WIND_EXPOSURE_OPTIONS = [
-    "Not applicable",
-    "Sheltered",
-    "Moderate",
-    "Open/exposed",
-    "Unknown",
-]
-
-DAY_OF_WEEK_OPTIONS = {
-    "Monday": 0,
-    "Tuesday": 1,
-    "Wednesday": 2,
-    "Thursday": 3,
-    "Friday": 4,
-    "Saturday": 5,
-    "Sunday": 6,
-}
-
-
-DAY_OF_WEEK_LABELS = {
-    0: "Monday",
-    1: "Tuesday",
-    2: "Wednesday",
-    3: "Thursday",
-    4: "Friday",
-    5: "Saturday",
-    6: "Sunday",
-}
 
 def activity_label(activity):
     """
@@ -3593,61 +3219,6 @@ def activity_label(activity):
     """
 
     return f"{ACTIVITY_ICONS.get(activity, '⭐')} {activity}"
-
-def safe_value(value, default=0):
-    if pd.isna(value):
-        return default
-    return value
-
-
-def range_score(value, ideal_low, ideal_high, absolute_low, absolute_high):
-    """
-    Scores something where a middle range is best.
-    """
-
-    if pd.isna(value):
-        return 50
-
-    if value <= absolute_low or value >= absolute_high:
-        return 0
-
-    if ideal_low <= value <= ideal_high:
-        return 100
-
-    if absolute_low < value < ideal_low:
-        return 100 * (value - absolute_low) / (ideal_low - absolute_low)
-
-    if ideal_high < value < absolute_high:
-        return 100 * (absolute_high - value) / (absolute_high - ideal_high)
-
-    return 0
-
-
-def low_is_good_score(value, ideal_max, bad_at):
-    """
-    Scores something where lower is better.
-    """
-
-    if pd.isna(value):
-        return 50
-
-    if value <= ideal_max:
-        return 100
-
-    if value >= bad_at:
-        return 0
-
-    return 100 * (bad_at - value) / (bad_at - ideal_max)
-
-
-def score_label(score):
-    if score >= 80:
-        return "Great"
-    if score >= 60:
-        return "Good"
-    if score >= 40:
-        return "Okay"
-    return "Poor"
 
 def score_color(score):
     """
@@ -4307,42 +3878,6 @@ def freshwater_water_temp_score(water_temp):
         absolute_low=40,
         absolute_high=84,
     )
-
-SPECIES_FISHING_PROFILES = {
-    "Bass Fishing": {
-        "ideal_water_temp": [60, 78],
-        "absolute_water_temp": [45, 88],
-        "bug_bonus": True,
-        "description": "Bass tend to favor warmer freshwater conditions.",
-    },
-    "Trout Fishing": {
-        "ideal_water_temp": [45, 60],
-        "absolute_water_temp": [35, 68],
-        "bug_bonus": True,
-        "description": "Trout generally prefer cooler water.",
-    },
-    "Walleye Fishing": {
-        "ideal_water_temp": [50, 70],
-        "absolute_water_temp": [38, 78],
-        "bug_bonus": False,
-        "description": "Walleye often do well in cooler to mild freshwater conditions.",
-    },
-    "Pike Fishing": {
-        "ideal_water_temp": [50, 65],
-        "absolute_water_temp": [35, 75],
-        "bug_bonus": False,
-        "description": "Pike often favor cooler to mild water.",
-    },
-    "Panfish Fishing": {
-        "ideal_water_temp": [60, 75],
-        "absolute_water_temp": [45, 85],
-        "bug_bonus": True,
-        "description": "Panfish often do well in mild to warm water.",
-    },
-}
-
-FISHING_ACTIVITIES = ["Fishing"]
-SPECIES_FISHING_ACTIVITY_NAMES = list(SPECIES_FISHING_PROFILES.keys())
 
 def storm_safety_score(row):
     """
