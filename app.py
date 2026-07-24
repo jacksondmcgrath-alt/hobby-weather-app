@@ -2132,6 +2132,143 @@ with planner_tab:
                     else:
                         st.warning("Check the confirmation box before deleting.")
 
+            st.markdown("---")
+            st.subheader("Log This Planned Activity")
+
+            with st.expander("Create activity log from this plan", expanded=False):
+                planned_log_col1, planned_log_col2 = st.columns(2)
+
+                with planned_log_col1:
+                    planned_actual_enjoyment = st.slider(
+                        "Actual enjoyment",
+                        min_value=1,
+                        max_value=10,
+                        value=7,
+                        key=f"planned_log_enjoyment_{selected_plan_id}",
+                    )
+
+                    planned_did_i_go = st.selectbox(
+                        "Did you go?",
+                        options=["Yes", "No", "Partially"],
+                        key=f"planned_log_did_go_{selected_plan_id}",
+                    )
+
+                    planned_actual_time = st.text_input(
+                        "Actual time",
+                        value="",
+                        placeholder="Example: 7:30 AM or 6:00 PM",
+                        key=f"planned_log_actual_time_{selected_plan_id}",
+                    )
+
+                    planned_followed_window = st.selectbox(
+                        "Did you go during the planned/recommended window?",
+                        options=["Not sure", "Yes", "No", "Partially"],
+                        key=f"planned_log_followed_window_{selected_plan_id}",
+                    )
+
+                with planned_log_col2:
+                    planned_actual_bugs = st.slider(
+                        "Actual bugs",
+                        min_value=0,
+                        max_value=10,
+                        value=5,
+                        key=f"planned_log_bugs_{selected_plan_id}",
+                    )
+
+                    planned_wind_annoyance = st.slider(
+                        "Actual wind annoyance",
+                        min_value=0,
+                        max_value=10,
+                        value=5,
+                        key=f"planned_log_wind_{selected_plan_id}",
+                    )
+
+                    planned_humidity_comfort = st.slider(
+                        "Actual humidity comfort",
+                        min_value=0,
+                        max_value=10,
+                        value=7,
+                        key=f"planned_log_humidity_{selected_plan_id}",
+                    )
+
+                planned_ground_wetness = "Not applicable"
+                planned_water_conditions = "Not applicable"
+                planned_fish_activity = "Not applicable"
+                planned_visibility_light = "Not applicable"
+
+                selected_plan_activity = selected_plan.get("activity")
+
+                if selected_plan_activity in ["Camping", "Running", "Disc Golf", "Tennis"]:
+                    planned_ground_wetness = st.selectbox(
+                        "Actual ground/course/trail condition",
+                        options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
+                        key=f"planned_log_ground_{selected_plan_id}",
+                    )
+
+                if selected_plan_activity in FISHING_ACTIVITIES + ["Kayaking", "Beach Day"]:
+                    planned_water_conditions = st.selectbox(
+                        "Actual water conditions",
+                        options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
+                        key=f"planned_log_water_{selected_plan_id}",
+                    )
+
+                if selected_plan_activity in FISHING_ACTIVITIES:
+                    planned_fish_activity = st.selectbox(
+                        "Fish activity",
+                        options=["None", "Low", "Medium", "High", "Not sure"],
+                        key=f"planned_log_fish_{selected_plan_id}",
+                    )
+
+                if selected_plan_activity == "Running":
+                    planned_visibility_light = st.selectbox(
+                        "Visibility/light conditions",
+                        options=["Bright daylight", "Low light but okay", "Too dark", "Not sure"],
+                        key=f"planned_log_visibility_{selected_plan_id}",
+                    )
+
+                planned_notes = st.text_area(
+                    "Notes",
+                    value=selected_plan.get("notes", "") if pd.notna(selected_plan.get("notes", "")) else "",
+                    placeholder="How did it go?",
+                    key=f"planned_log_notes_{selected_plan_id}",
+                )
+
+                if st.button(
+                    "Save activity log from plan",
+                    key=f"save_log_from_plan_{selected_plan_id}",
+                ):
+                    actual_score = planned_actual_enjoyment * 10
+
+                    actual_data = {
+                        "actual_time": planned_actual_time,
+                        "followed_recommended_window": planned_followed_window,
+                        "actual_enjoyment_1_to_10": planned_actual_enjoyment,
+                        "actual_score_0_to_100": actual_score,
+                        "did_i_go": planned_did_i_go,
+                        "actual_bugs_1_to_10": planned_actual_bugs,
+                        "actual_wind_annoyance_1_to_10": planned_wind_annoyance,
+                        "actual_humidity_comfort_1_to_10": planned_humidity_comfort,
+                        "actual_ground_wetness": planned_ground_wetness,
+                        "actual_water_conditions": planned_water_conditions,
+                        "fish_activity": planned_fish_activity,
+                        "visibility_light": planned_visibility_light,
+                        "notes": planned_notes,
+                    }
+
+                    try:
+                        create_activity_log_from_plan(
+                            selected_plan,
+                            actual_data,
+                        )
+
+                        st.success("Activity log created and plan marked as Completed.")
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error("Could not create activity log from plan.")
+                        st.write(type(e).__name__)
+                        st.write(e)
+
 # -------------------------
 # Log actual result
 # -------------------------
@@ -2788,7 +2925,7 @@ with manage_tab:
 
         st.subheader("Weekly Schedule / Obligations")
         st.caption("Add recurring unavailable times so suggested windows avoid them.")
-        
+
         st.write(
             "Add recurring times when you are unavailable. "
             "Suggested activity windows will avoid these times."

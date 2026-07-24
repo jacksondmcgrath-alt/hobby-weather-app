@@ -851,6 +851,69 @@ def delete_planned_activity(plan_id):
 
     return response
 
+def create_activity_log_from_plan(plan, actual_data):
+    """
+    Creates an activity log entry from a planned activity.
+
+    Then updates the planned activity status to Completed.
+    """
+
+    supabase = get_supabase_client()
+
+    predicted_score = plan.get("score_at_planning")
+    actual_score = actual_data.get("actual_score_0_to_100")
+
+    try:
+        if predicted_score is None or actual_score is None:
+            prediction_error = None
+            absolute_error = None
+        else:
+            prediction_error = float(actual_score) - float(predicted_score)
+            absolute_error = abs(prediction_error)
+    except Exception:
+        prediction_error = None
+        absolute_error = None
+
+    new_log = {
+        "logged_at": datetime.now().isoformat(timespec="seconds"),
+        "date": plan.get("planned_date"),
+        "activity": plan.get("activity"),
+        "predicted_score": predicted_score,
+        "recommended_time_window": plan.get("planned_window"),
+        "time_window_score": None,
+        "actual_time": actual_data.get("actual_time"),
+        "followed_recommended_window": actual_data.get("followed_recommended_window"),
+        "actual_enjoyment_1_to_10": actual_data.get("actual_enjoyment_1_to_10"),
+        "actual_score_0_to_100": actual_score,
+        "prediction_error": prediction_error,
+        "absolute_error": absolute_error,
+        "did_i_go": actual_data.get("did_i_go"),
+        "actual_bugs_1_to_10": actual_data.get("actual_bugs_1_to_10"),
+        "actual_wind_annoyance_1_to_10": actual_data.get("actual_wind_annoyance_1_to_10"),
+        "actual_humidity_comfort_1_to_10": actual_data.get("actual_humidity_comfort_1_to_10"),
+        "actual_ground_wetness": actual_data.get("actual_ground_wetness"),
+        "actual_water_conditions": actual_data.get("actual_water_conditions"),
+        "fish_activity": actual_data.get("fish_activity"),
+        "visibility_light": actual_data.get("visibility_light"),
+        "notes": actual_data.get("notes"),
+    }
+
+    # Save log
+    save_log_entry(new_log)
+
+    # Update plan status
+    plan_id = plan.get("id")
+
+    if plan_id is not None:
+        update_planned_activity_status(
+            plan_id,
+            "Completed",
+        )
+
+    load_activity_log.clear()
+    load_planned_activities.clear()
+
+    return new_log
 
 # =========================
 # Weekly obligations
