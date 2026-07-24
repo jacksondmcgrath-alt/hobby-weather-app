@@ -54,6 +54,218 @@ def score_badge_html(score, label=None):
     </span>
     """
 
+def data_quality_badge_html(label, badge_type="neutral"):
+    """
+    Creates a small colored badge for data quality/source indicators.
+
+    badge_type options:
+    - good
+    - info
+    - warning
+    - danger
+    - neutral
+    """
+
+    color_map = {
+        "good": "#1f8f4d",
+        "info": "#2f80ed",
+        "warning": "#d9822b",
+        "danger": "#c0392b",
+        "neutral": "#6c757d",
+    }
+
+    color = color_map.get(badge_type, color_map["neutral"])
+
+    return f"""
+    <span style="
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background-color: {color};
+        color: white;
+        font-weight: 600;
+        font-size: 0.78rem;
+        line-height: 1.2;
+        white-space: nowrap;
+    ">
+        {label}
+    </span>
+    """
+
+
+def render_data_quality_badges(badges):
+    """
+    Renders a list of badge dictionaries horizontally.
+
+    Expected format:
+    [
+        {"label": "Fresh forecast", "type": "good"},
+        {"label": "USGS observed", "type": "info"},
+    ]
+    """
+
+    if badges is None or len(badges) == 0:
+        return
+
+    badge_html = "".join(
+        data_quality_badge_html(
+            badge.get("label", ""),
+            badge.get("type", "neutral"),
+        )
+        for badge in badges
+    )
+
+    html = f"""
+    <div style="
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        margin: 4px 0 8px 0;
+    ">
+        {badge_html}
+    </div>
+    """
+
+    st.markdown(
+        html,
+        unsafe_allow_html=True,
+    )
+
+
+def build_data_quality_badges(
+    forecast_source=None,
+    default_location=None,
+    usgs_water_data=None,
+    ndbc_data=None,
+    nws_alerts=None,
+    chop_summary=None,
+    schedule_aware=False,
+    water_activity=False,
+):
+    """
+    Builds data quality/source badges for a recommendation card.
+    """
+
+    badges = []
+
+    # -------------------------
+    # Forecast source
+    # -------------------------
+
+    if forecast_source == "fresh":
+        badges.append({
+            "label": "Fresh forecast",
+            "type": "good",
+        })
+
+    elif forecast_source == "cached":
+        badges.append({
+            "label": "Cached forecast",
+            "type": "info",
+        })
+
+    elif forecast_source == "stale":
+        badges.append({
+            "label": "Stale forecast fallback",
+            "type": "warning",
+        })
+
+    else:
+        badges.append({
+            "label": "Forecast source unknown",
+            "type": "neutral",
+        })
+
+    # -------------------------
+    # Location source
+    # -------------------------
+
+    if default_location is not None:
+        badges.append({
+            "label": "Saved location",
+            "type": "good",
+        })
+    else:
+        badges.append({
+            "label": "Manual location",
+            "type": "neutral",
+        })
+
+    # -------------------------
+    # Water data
+    # -------------------------
+
+    if water_activity:
+        if usgs_water_data:
+            badges.append({
+                "label": "USGS water observed",
+                "type": "good",
+            })
+
+        elif ndbc_data:
+            badges.append({
+                "label": "Buoy water observed",
+                "type": "good",
+            })
+
+        else:
+            badges.append({
+                "label": "Water estimated",
+                "type": "neutral",
+            })
+
+    # -------------------------
+    # Chop / roughness
+    # -------------------------
+
+    if chop_summary:
+        chop_score = chop_summary.get("chop_score")
+
+        try:
+            chop_score = float(chop_score)
+        except Exception:
+            chop_score = None
+
+        if chop_score is not None:
+            if chop_score >= 75:
+                badges.append({
+                    "label": "Calm water estimate",
+                    "type": "good",
+                })
+            elif chop_score >= 50:
+                badges.append({
+                    "label": "Choppy water estimate",
+                    "type": "warning",
+                })
+            else:
+                badges.append({
+                    "label": "Rough water estimate",
+                    "type": "danger",
+                })
+
+    # -------------------------
+    # NWS alerts
+    # -------------------------
+
+    if nws_alerts is not None and len(nws_alerts) > 0:
+        badges.append({
+            "label": "Active NWS alert",
+            "type": "danger",
+        })
+
+    # -------------------------
+    # Schedule-aware time windows
+    # -------------------------
+
+    if schedule_aware:
+        badges.append({
+            "label": "Schedule-aware",
+            "type": "info",
+        })
+
+    return badges
 
 def dashboard_warning_text(row):
     """
