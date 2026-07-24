@@ -488,252 +488,281 @@ activity_log = load_activity_log()
 # -------------------------
 
 with scenario_tab:
-    st.header("Rate Scenarios")
+    st.header("Scenario Ratings")
 
     st.write(
-        "Rate hypothetical weather situations. These ratings can later help train "
-        "a machine learning model for better first-time predictions."
+        "Rate hypothetical or historical weather situations. These ratings help build "
+        "a future machine-learning baseline for first-time predictions."
     )
 
-    available_scenario_activities = [
-        activity
-        for activity in sorted(predictions["activity"].unique())
-        if activity in ACTIVITY_SCENARIO_FIELDS
-    ]
+    scenario_section_labels = {
+        "Rate": "🧪 Rate",
+        "Insights": "📊 Insights",
+        "Progress": "🎯 Progress",
+        "Manage": "🛠️ Manage Ratings",
+    }
 
-    if len(available_scenario_activities) == 0:
-        st.info("No scenario activities available.")
+    scenario_section = st.radio(
+        "Scenario section",
+        options=list(scenario_section_labels.keys()),
+        format_func=lambda option: scenario_section_labels[option],
+        horizontal=True,
+        key="scenario_section_selector",
+    )
 
-    else:
-        selected_scenario_activity = st.selectbox(
-            "Choose activity",
-            options=available_scenario_activities,
-            key="scenario_activity_select",
-        )
-        scenario_source = st.radio(
-            "Scenario source",
-            options=["Random synthetic", "Historical weather"],
-            horizontal=True,
-            key="scenario_source_select",
-        )
+    # -------------------------
+    # Rate Scenario
+    # -------------------------
 
-        scenario_state_changed = (
-            "current_scenario" not in st.session_state
-            or st.session_state.get("current_scenario_activity") != selected_scenario_activity
-            or st.session_state.get("current_scenario_source") != scenario_source
-        )
+    if scenario_section == "Rate":
+        available_scenario_activities = [
+            activity
+            for activity in sorted(predictions["activity"].unique())
+            if activity in ACTIVITY_SCENARIO_FIELDS
+        ]
 
-        if scenario_state_changed:
-            if scenario_source == "Historical weather":
-                st.session_state["current_scenario"] = generate_historical_scenario(
-                    selected_scenario_activity,
-                    latitude,
-                    longitude,
-                )
-            else:
-                st.session_state["current_scenario"] = generate_random_scenario(
-                    selected_scenario_activity
-                )
+        if len(available_scenario_activities) == 0:
+            st.info("No scenario activities available.")
 
-            st.session_state["current_scenario_activity"] = selected_scenario_activity
-            st.session_state["current_scenario_source"] = scenario_source
-        if st.button("Generate new scenario"):
-            if scenario_source == "Historical weather":
-                st.session_state["current_scenario"] = generate_historical_scenario(
-                    selected_scenario_activity,
-                    latitude,
-                    longitude,
-                )
-            else:
-                st.session_state["current_scenario"] = generate_random_scenario(
-                    selected_scenario_activity
-                )
-
-            st.session_state["current_scenario_activity"] = selected_scenario_activity
-            st.session_state["current_scenario_source"] = scenario_source
-            st.rerun()
-
-        scenario = st.session_state["current_scenario"]
-
-        if scenario.get("scenario_generation_method") == "historical_weather_v1":
-            st.caption(
-                f"Historical weather scenario from {scenario.get('historical_date', 'unknown date')} "
-                f"at {scenario.get('historical_time', 'unknown time')}."
-            )
         else:
-            st.caption("Random synthetic scenario.")
-
-        st.subheader(f"Scenario: {activity_label(selected_scenario_activity)}")
-
-        scenario_display_rows = []
-
-        pretty_names = {
-            "temperature": "Temperature °F",
-            "wind_speed": "Wind speed mph",
-            "wind_gust": "Wind gust mph",
-            "rain_chance": "Rain chance %",
-            "humidity": "Humidity %",
-            "cloud_cover": "Cloud cover %",
-            "pressure_change": "Pressure change",
-            "bug_index": "Bug index",
-            "water_temp": "Water temp °F",
-            "storm_safety": "Storm safety",
-            "dew_point": "Dew point °F",
-            "aqi": "AQI",
-            "uv_index": "UV index",
-            "visibility": "Visibility miles",
-            "wind_direction": "Wind direction °",
-            "rain_amount": "Rain amount inches",
-            "recent_rain_24h": "Recent rain 24h inches",
-            "recent_rain_72h": "Recent rain 72h inches",
-            "overnight_low": "Overnight low °F",
-            "month": "Month",
-            "season": "Season",
-            "daylight_hours": "Daylight hours",
-            "moon_phase": "Moon phase",
-            "moon_illumination": "Moon illumination %",
-            "pollen_index": "Pollen index",
-            "river_flow_cfs": "River flow CFS",
-            "gauge_height": "Gauge height",
-            "flow_trend": "Flow trend",
-            "wave_height_ft": "Wave height ft",
-            "rip_current_risk": "Rip current risk",
-            "fire_danger": "Fire danger",
-        }
-
-        scenario_mode = st.selectbox(
-            "Scenario detail level",
-            options=["basic", "advanced"],
-            index=0,
-            help="Basic shows the main factors. Advanced can include more context later.",
-            key="scenario_mode_select",
-        )
-
-        display_fields = get_shown_features_for_scenario(
-            selected_scenario_activity,
-            scenario_mode=scenario_mode,
-        )
-
-        for key in display_fields:
-            value = scenario.get(key)
-
-            scenario_display_rows.append(
-                {
-                    "Factor": pretty_names.get(key, key),
-                    "Value": value,
-                }
+            selected_scenario_activity = st.selectbox(
+                "Choose activity",
+                options=available_scenario_activities,
+                key="scenario_activity_select",
             )
 
-        st.dataframe(
-            pd.DataFrame(scenario_display_rows),
-            width="stretch",
-        )
+            scenario_source = st.radio(
+                "Scenario source",
+                options=["Random synthetic", "Historical weather"],
+                horizontal=True,
+                key="scenario_source_select",
+            )
 
-        st.write("### Your rating")
+            scenario_mode = st.selectbox(
+                "Scenario detail level",
+                options=["basic", "advanced"],
+                index=0,
+                help="Basic shows the main factors. Advanced includes more stored context.",
+                key="scenario_mode_select",
+            )
 
-        scenario_rating = st.slider(
-            "How good does this scenario sound?",
-            min_value=1,
-            max_value=10,
-            value=5,
-            help="1 = terrible, 10 = excellent",
-            key="scenario_rating_slider",
-        )
+            scenario_state_changed = (
+                "current_scenario" not in st.session_state
+                or st.session_state.get("current_scenario_activity") != selected_scenario_activity
+                or st.session_state.get("current_scenario_source") != scenario_source
+            )
 
-        rater_confidence = st.slider(
-            "How confident are you in this rating?",
-            min_value=1,
-            max_value=10,
-            value=7,
-            help="1 = guessing, 10 = very confident",
-            key="scenario_rater_confidence",
-        )
-
-        rater_experience_level = st.selectbox(
-            "Your experience level for this activity",
-            options=["Beginner", "Intermediate", "Advanced", "Expert", "Not sure"],
-            index=1,
-            key="scenario_experience_level",
-        )
-
-        assume_safe_conditions = st.checkbox(
-            "Assume normal safety precautions are taken",
-            value=True,
-            help="Example: wearing a PFD for kayaking, checking local alerts, using sunscreen.",
-            key="scenario_assume_safe",
-        )
-
-        scenario_notes = st.text_area(
-            "Notes",
-            placeholder="Example: Wind seems too high, or this looks perfect for evening fishing.",
-            key="scenario_rating_notes",
-        )
-
-        scenario_save_key = json.dumps(
-            clean_json_value(
-                {
-                    "scenario": scenario,
-                    "rating": scenario_rating,
-                    "notes": scenario_notes,
-                }
-            ),
-            sort_keys=True,
-        )
-
-        if st.button("Save scenario rating"):
-            if st.session_state.get("last_saved_scenario_key") == scenario_save_key:
-                st.warning(
-                    "This scenario rating was already saved. "
-                    "Generate a new scenario or change the rating/notes."
-                )
-
-            else:
-                try:
-                    save_scenario_rating(
-                        scenario=scenario,
-                        rating=scenario_rating,
-                        notes=scenario_notes,
-                        scenario_mode=scenario_mode,
-                        rater_confidence=rater_confidence,
-                        rater_experience_level=rater_experience_level,
-                        assume_safe_conditions=assume_safe_conditions,
+            if scenario_state_changed:
+                if scenario_source == "Historical weather":
+                    st.session_state["current_scenario"] = generate_historical_scenario(
+                        selected_scenario_activity,
+                        latitude,
+                        longitude,
+                    )
+                else:
+                    st.session_state["current_scenario"] = generate_random_scenario(
+                        selected_scenario_activity
                     )
 
-                    st.session_state["last_saved_scenario_key"] = scenario_save_key
+                st.session_state["current_scenario_activity"] = selected_scenario_activity
+                st.session_state["current_scenario_source"] = scenario_source
 
-                    st.success("Scenario rating saved.")
+            if st.button("Generate new scenario"):
+                if scenario_source == "Historical weather":
+                    st.session_state["current_scenario"] = generate_historical_scenario(
+                        selected_scenario_activity,
+                        latitude,
+                        longitude,
+                    )
+                else:
+                    st.session_state["current_scenario"] = generate_random_scenario(
+                        selected_scenario_activity
+                    )
 
-                    if scenario_source == "Historical weather":
-                        st.session_state["current_scenario"] = generate_historical_scenario(
-                            selected_scenario_activity,
-                            latitude,
-                            longitude,
+                st.session_state["current_scenario_activity"] = selected_scenario_activity
+                st.session_state["current_scenario_source"] = scenario_source
+                st.rerun()
+
+            scenario = st.session_state["current_scenario"]
+
+            if scenario.get("scenario_generation_method") == "historical_weather_v1":
+                st.caption(
+                    f"Historical weather scenario from "
+                    f"{scenario.get('historical_date', 'unknown date')} "
+                    f"at {scenario.get('historical_time', 'unknown time')}."
+                )
+            else:
+                st.caption("Random synthetic scenario.")
+
+            st.subheader(f"Scenario: {activity_label(selected_scenario_activity)}")
+
+            pretty_names = {
+                "temperature": "Temperature °F",
+                "wind_speed": "Wind speed mph",
+                "wind_gust": "Wind gust mph",
+                "rain_chance": "Rain chance %",
+                "humidity": "Humidity %",
+                "cloud_cover": "Cloud cover %",
+                "pressure_change": "Pressure change",
+                "bug_index": "Bug index",
+                "water_temp": "Water temp °F",
+                "storm_safety": "Storm safety",
+                "dew_point": "Dew point °F",
+                "aqi": "AQI",
+                "uv_index": "UV index",
+                "visibility": "Visibility miles",
+                "wind_direction": "Wind direction °",
+                "rain_amount": "Rain amount inches",
+                "recent_rain_24h": "Recent rain 24h inches",
+                "recent_rain_72h": "Recent rain 72h inches",
+                "overnight_low": "Overnight low °F",
+                "month": "Month",
+                "season": "Season",
+                "daylight_hours": "Daylight hours",
+                "moon_phase": "Moon phase",
+                "moon_illumination": "Moon illumination %",
+                "pollen_index": "Pollen index",
+                "river_flow_cfs": "River flow CFS",
+                "gauge_height": "Gauge height",
+                "flow_trend": "Flow trend",
+                "wave_height_ft": "Wave height ft",
+                "rip_current_risk": "Rip current risk",
+                "fire_danger": "Fire danger",
+            }
+
+            display_fields = get_shown_features_for_scenario(
+                selected_scenario_activity,
+                scenario_mode=scenario_mode,
+            )
+
+            scenario_display_rows = []
+
+            for key in display_fields:
+                scenario_display_rows.append(
+                    {
+                        "Factor": pretty_names.get(key, key),
+                        "Value": scenario.get(key),
+                    }
+                )
+
+            st.dataframe(
+                pd.DataFrame(scenario_display_rows),
+                width="stretch",
+            )
+
+            st.write("### Your rating")
+
+            scenario_rating = st.slider(
+                "How good does this scenario sound?",
+                min_value=1,
+                max_value=10,
+                value=5,
+                help="1 = terrible, 10 = excellent",
+                key="scenario_rating_slider",
+            )
+
+            rater_confidence = st.slider(
+                "How confident are you in this rating?",
+                min_value=1,
+                max_value=10,
+                value=7,
+                help="1 = guessing, 10 = very confident",
+                key="scenario_rater_confidence",
+            )
+
+            rater_experience_level = st.selectbox(
+                "Your experience level for this activity",
+                options=["Beginner", "Intermediate", "Advanced", "Expert", "Not sure"],
+                index=1,
+                key="scenario_experience_level",
+            )
+
+            assume_safe_conditions = st.checkbox(
+                "Assume normal safety precautions are taken",
+                value=True,
+                help="Example: wearing a PFD for kayaking, checking alerts, using sunscreen.",
+                key="scenario_assume_safe",
+            )
+
+            scenario_notes = st.text_area(
+                "Notes",
+                placeholder="Example: Wind seems too high, or this looks perfect for evening fishing.",
+                key="scenario_rating_notes",
+            )
+
+            scenario_save_key = json.dumps(
+                clean_json_value(
+                    {
+                        "scenario": scenario,
+                        "rating": scenario_rating,
+                        "notes": scenario_notes,
+                        "scenario_mode": scenario_mode,
+                        "rater_confidence": rater_confidence,
+                        "rater_experience_level": rater_experience_level,
+                        "assume_safe_conditions": assume_safe_conditions,
+                    }
+                ),
+                sort_keys=True,
+            )
+
+            if st.button("Save scenario rating"):
+                if st.session_state.get("last_saved_scenario_key") == scenario_save_key:
+                    st.warning(
+                        "This scenario rating was already saved. "
+                        "Generate a new scenario or change the rating/notes."
+                    )
+
+                else:
+                    try:
+                        save_scenario_rating(
+                            scenario=scenario,
+                            rating=scenario_rating,
+                            notes=scenario_notes,
+                            scenario_mode=scenario_mode,
+                            rater_confidence=rater_confidence,
+                            rater_experience_level=rater_experience_level,
+                            assume_safe_conditions=assume_safe_conditions,
                         )
-                    else:
-                        st.session_state["current_scenario"] = generate_random_scenario(
-                            selected_scenario_activity
-                        )
 
-                    st.session_state["current_scenario_activity"] = selected_scenario_activity
+                        st.session_state["last_saved_scenario_key"] = scenario_save_key
 
-                    st.rerun()
+                        st.success("Scenario rating saved.")
 
-                except Exception as e:
-                    error_text = str(e)
+                        if scenario_source == "Historical weather":
+                            st.session_state["current_scenario"] = generate_historical_scenario(
+                                selected_scenario_activity,
+                                latitude,
+                                longitude,
+                            )
+                        else:
+                            st.session_state["current_scenario"] = generate_random_scenario(
+                                selected_scenario_activity
+                            )
 
-                    if (
-                        "duplicate key" in error_text
-                        or "scenario_ratings_fingerprint_unique" in error_text
-                    ):
-                        st.warning("This exact scenario rating already exists.")
+                        st.session_state["current_scenario_activity"] = selected_scenario_activity
+                        st.session_state["current_scenario_source"] = scenario_source
 
-                    else:
-                        st.error("Could not save scenario rating.")
-                        st.write(type(e).__name__)
-                        st.write(e)
+                        st.rerun()
 
-        st.markdown("---")
+                    except Exception as e:
+                        error_text = str(e)
 
+                        if (
+                            "duplicate key" in error_text
+                            or "scenario_ratings_fingerprint_unique" in error_text
+                        ):
+                            st.warning("This exact scenario rating already exists.")
+
+                        else:
+                            st.error("Could not save scenario rating.")
+                            st.write(type(e).__name__)
+                            st.write(e)
+
+    # -------------------------
+    # Scenario Insights
+    # -------------------------
+
+    elif scenario_section == "Insights":
         st.subheader("Scenario Insights")
 
         scenario_ratings = load_scenario_ratings()
@@ -751,10 +780,6 @@ with scenario_tab:
             scenario_ratings_clean = prepare_scenario_ratings_for_insights(
                 scenario_ratings
             )
-
-            # -------------------------
-            # Filters
-            # -------------------------
 
             with st.expander("Filter scenario insights", expanded=False):
                 activity_filter_options = ["All"] + sorted(
@@ -829,10 +854,6 @@ with scenario_tab:
                     filtered_scenarios["rater_experience_level"] == selected_experience_filter
                 ]
 
-            # -------------------------
-            # Top-level metrics
-            # -------------------------
-
             metric_col1, metric_col2, metric_col3 = st.columns(3)
 
             with metric_col1:
@@ -866,10 +887,6 @@ with scenario_tab:
                 st.info("No scenario ratings match the selected filters.")
 
             else:
-                # -------------------------
-                # Activity summary
-                # -------------------------
-
                 st.write("### Ratings by Activity")
 
                 rating_summary = build_scenario_activity_summary(
@@ -884,10 +901,6 @@ with scenario_tab:
                 st.bar_chart(
                     rating_summary.set_index("activity")["average_rating"]
                 )
-
-                # -------------------------
-                # Highest and lowest rated scenarios
-                # -------------------------
 
                 st.write("### Highest-Rated Scenarios")
 
@@ -939,10 +952,6 @@ with scenario_tab:
                     width="stretch",
                 )
 
-                # -------------------------
-                # Raw data
-                # -------------------------
-
                 with st.expander("View raw scenario ratings", expanded=False):
                     st.dataframe(
                         filtered_scenarios,
@@ -956,7 +965,20 @@ with scenario_tab:
                     mime="text/csv",
                 )
 
+    # -------------------------
+    # Scenario Progress
+    # -------------------------
+
+    elif scenario_section == "Progress":
         st.subheader("Scenario Progress Goals")
+
+        scenario_ratings = load_scenario_ratings()
+
+        if "id" in scenario_ratings.columns:
+            scenario_ratings = scenario_ratings.drop_duplicates(
+                subset=["id"],
+                keep="first",
+            ).reset_index(drop=True)
 
         goal_per_activity = st.number_input(
             "Target ratings per activity",
@@ -1001,8 +1023,11 @@ with scenario_tab:
                 width="stretch",
             )
 
-        st.markdown("---")
+    # -------------------------
+    # Manage Scenario Ratings
+    # -------------------------
 
+    elif scenario_section == "Manage":
         st.subheader("Manage Scenario Ratings")
 
         scenario_manage_df = load_scenario_ratings()
