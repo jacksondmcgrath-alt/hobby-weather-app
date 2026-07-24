@@ -2481,9 +2481,27 @@ with manage_tab:
     )
 
     if manage_view == "Activity Logs":
+
         st.subheader("Activity Logs")
+        st.caption("Edit or delete actual activity logs you have saved.")
 
         activity_log = load_activity_log()
+
+        log_summary = summarize_activity_logs(activity_log)
+
+        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+
+        with metric_col1:
+            st.metric("Total Logs", log_summary["total_logs"])
+
+        with metric_col2:
+            st.metric("Activities Logged", log_summary["unique_activities"])
+
+        with metric_col3:
+            st.metric("Avg Actual Score", log_summary["average_actual_score"])
+
+        with metric_col4:
+            st.metric("Latest Log", log_summary["latest_log"])
 
         if len(activity_log) == 0:
             st.info("No log entries available to manage.")
@@ -2520,10 +2538,11 @@ with manage_tab:
 
             st.write("Selected log:")
 
-            st.dataframe(
-                pd.DataFrame([selected_log.drop(labels=["display_label"])]),
-                width="stretch",
-            )
+            with st.expander("View selected log details", expanded=False):
+                st.dataframe(
+                    pd.DataFrame([selected_log.drop(labels=["display_label"])]),
+                    width="stretch",
+                )
 
             st.markdown("---")
             st.write("### Edit Selected Log")
@@ -2766,8 +2785,10 @@ with manage_tab:
                         st.warning("Check the confirmation box before deleting.")
 
     elif manage_view == "Weekly Schedule":
-        st.subheader("Weekly Schedule / Obligations")
 
+        st.subheader("Weekly Schedule / Obligations")
+        st.caption("Add recurring unavailable times so suggested windows avoid them.")
+        
         st.write(
             "Add recurring times when you are unavailable. "
             "Suggested activity windows will avoid these times."
@@ -2810,6 +2831,19 @@ with manage_tab:
 
         obligations = load_weekly_obligations()
 
+        obligation_summary = summarize_weekly_obligations(obligations)
+
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+        with metric_col1:
+            st.metric("Total Obligations", obligation_summary["total_obligations"])
+
+        with metric_col2:
+            st.metric("Active", obligation_summary["active_obligations"])
+
+        with metric_col3:
+            st.metric("Days Blocked", obligation_summary["days_blocked"])
+
         if len(obligations) == 0:
             st.info("No weekly obligations saved.")
 
@@ -2820,19 +2854,20 @@ with manage_tab:
                 lambda value: DAY_OF_WEEK_LABELS.get(int(value), str(value))
             )
 
-            st.dataframe(
-                display_obligations[
-                    [
-                        "id",
-                        "label",
-                        "day",
-                        "start_time",
-                        "end_time",
-                        "active",
-                    ]
-                ],
-                width="stretch",
-            )
+            with st.expander("View weekly schedule table", expanded=False):
+                st.dataframe(
+                    display_obligations[
+                        [
+                            "id",
+                            "label",
+                            "day",
+                            "start_time",
+                            "end_time",
+                            "active",
+                        ]
+                    ],
+                    width="stretch",
+                )
 
             display_obligations["display_label"] = (
                 display_obligations["id"].astype(str)
@@ -2873,9 +2908,32 @@ with manage_tab:
                     st.warning("Check the confirmation box before deleting.")
 
     elif manage_view == "Saved Locations":
+
         st.subheader("Saved Locations")
+        st.caption("Add, edit, delete, and assign default locations for activities.")
 
         saved_locations = load_saved_locations()
+
+        activity_location_defaults = load_activity_location_defaults()
+
+        location_summary = summarize_saved_locations(
+            saved_locations,
+            activity_location_defaults,
+        )
+
+        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+
+        with metric_col1:
+            st.metric("Saved Locations", location_summary["total_locations"])
+
+        with metric_col2:
+            st.metric("Activity Defaults", location_summary["default_mappings"])
+
+        with metric_col3:
+            st.metric("Water Locations", location_summary["water_locations"])
+
+        with metric_col4:
+            st.metric("USGS Enabled", location_summary["usgs_locations"])
 
         st.write("### Add New Location")
 
@@ -3088,10 +3146,11 @@ with manage_tab:
             st.info("No saved locations yet.")
 
         else:
-            st.dataframe(
-                saved_locations,
-                width="stretch",
-            )
+            with st.expander("View saved locations table", expanded=False):
+                st.dataframe(
+                    saved_locations,
+                    width="stretch",
+                )
 
             saved_locations["display_label"] = (
                 saved_locations["id"].astype(str)
@@ -3394,9 +3453,30 @@ with manage_tab:
                             st.rerun()
 
     elif manage_view == "Planned Activities":
+
         st.subheader("Planned Activities")
+        st.caption("Review planned activities and update their status.")
 
         plans = load_planned_activities()
+
+        plan_summary = summarize_planned_activities(plans)
+
+        metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
+
+        with metric_col1:
+            st.metric("Total", plan_summary["total_plans"])
+
+        with metric_col2:
+            st.metric("Planned", plan_summary["planned"])
+
+        with metric_col3:
+            st.metric("Maybe", plan_summary["maybe"])
+
+        with metric_col4:
+            st.metric("Completed", plan_summary["completed"])
+
+        with metric_col5:
+            st.metric("Canceled", plan_summary["canceled"])
 
         if len(plans) == 0:
             st.info("No planned activities yet.")
@@ -3407,10 +3487,11 @@ with manage_tab:
                 predictions,
             )
 
-            st.dataframe(
-                plans_with_current.sort_values("planned_date"),
-                width="stretch",
-            )
+            with st.expander("View planned activities table", expanded=False):
+                st.dataframe(
+                    plans_with_current.sort_values("planned_date"),
+                    width="stretch",
+                )
 
             plans_with_current["display_label"] = (
                 plans_with_current["id"].astype(str)

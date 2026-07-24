@@ -479,3 +479,184 @@ def build_tuning_suggestions(activity_log):
         )
 
     return suggestions
+
+def summarize_activity_logs(activity_log):
+    """
+    Builds summary stats for activity logs.
+    """
+
+    if activity_log is None or len(activity_log) == 0:
+        return {
+            "total_logs": 0,
+            "unique_activities": 0,
+            "latest_log": "N/A",
+            "average_actual_score": "N/A",
+        }
+
+    df = activity_log.copy()
+
+    total_logs = len(df)
+
+    unique_activities = (
+        df["activity"].nunique()
+        if "activity" in df.columns
+        else 0
+    )
+
+    latest_log = "N/A"
+
+    if "logged_at" in df.columns and "activity" in df.columns:
+        try:
+            df["logged_at_dt"] = pd.to_datetime(
+                df["logged_at"],
+                errors="coerce",
+            )
+
+            latest_row = df.sort_values(
+                "logged_at_dt",
+                ascending=False,
+            ).iloc[0]
+
+            latest_log = f"{latest_row.get('activity', 'Unknown')} on {latest_row.get('date', 'unknown date')}"
+
+        except Exception:
+            latest_log = "N/A"
+
+    average_actual_score = "N/A"
+
+    if "actual_score_0_to_100" in df.columns:
+        actual_scores = pd.to_numeric(
+            df["actual_score_0_to_100"],
+            errors="coerce",
+        ).dropna()
+
+        if len(actual_scores) > 0:
+            average_actual_score = round(actual_scores.mean(), 1)
+
+    return {
+        "total_logs": total_logs,
+        "unique_activities": unique_activities,
+        "latest_log": latest_log,
+        "average_actual_score": average_actual_score,
+    }
+
+
+def summarize_saved_locations(saved_locations, activity_location_defaults=None):
+    """
+    Builds summary stats for saved locations.
+    """
+
+    if saved_locations is None or len(saved_locations) == 0:
+        return {
+            "total_locations": 0,
+            "default_mappings": 0,
+            "water_locations": 0,
+            "usgs_locations": 0,
+        }
+
+    df = saved_locations.copy()
+
+    total_locations = len(df)
+
+    default_mappings = 0
+
+    if activity_location_defaults is not None:
+        default_mappings = len(activity_location_defaults)
+
+    water_locations = 0
+
+    if "water_type" in df.columns:
+        water_locations = len(
+            df[
+                ~df["water_type"]
+                .fillna("Not applicable")
+                .isin(["Not applicable", "", "Unknown"])
+            ]
+        )
+
+    usgs_locations = 0
+
+    if "use_usgs_water_data" in df.columns:
+        try:
+            usgs_locations = int(df["use_usgs_water_data"].fillna(False).astype(bool).sum())
+        except Exception:
+            usgs_locations = 0
+
+    return {
+        "total_locations": total_locations,
+        "default_mappings": default_mappings,
+        "water_locations": water_locations,
+        "usgs_locations": usgs_locations,
+    }
+
+
+def summarize_planned_activities(plans):
+    """
+    Builds summary stats for planned activities.
+    """
+
+    if plans is None or len(plans) == 0:
+        return {
+            "total_plans": 0,
+            "planned": 0,
+            "maybe": 0,
+            "completed": 0,
+            "canceled": 0,
+        }
+
+    df = plans.copy()
+
+    status_counts = (
+        df["status"].fillna("Unknown").value_counts().to_dict()
+        if "status" in df.columns
+        else {}
+    )
+
+    return {
+        "total_plans": len(df),
+        "planned": status_counts.get("Planned", 0),
+        "maybe": status_counts.get("Maybe", 0),
+        "completed": status_counts.get("Completed", 0),
+        "canceled": status_counts.get("Canceled", 0),
+    }
+
+
+def summarize_weekly_obligations(obligations):
+    """
+    Builds summary stats for weekly obligations.
+    """
+
+    if obligations is None or len(obligations) == 0:
+        return {
+            "total_obligations": 0,
+            "active_obligations": 0,
+            "days_blocked": 0,
+        }
+
+    df = obligations.copy()
+
+    total_obligations = len(df)
+
+    active_obligations = 0
+
+    if "active" in df.columns:
+        try:
+            active_obligations = int(df["active"].fillna(True).astype(bool).sum())
+        except Exception:
+            active_obligations = total_obligations
+    else:
+        active_obligations = total_obligations
+
+    days_blocked = 0
+
+    if "day_of_week" in df.columns:
+        try:
+            days_blocked = df["day_of_week"].dropna().nunique()
+        except Exception:
+            days_blocked = 0
+
+    return {
+        "total_obligations": total_obligations,
+        "active_obligations": active_obligations,
+        "days_blocked": days_blocked,
+    }
