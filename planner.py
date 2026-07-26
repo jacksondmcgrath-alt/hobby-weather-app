@@ -1185,6 +1185,86 @@ def build_best_day_by_activity(predictions):
 
     return pd.DataFrame(rows)
 
+def get_best_activity_for_date(predictions, forecast_date):
+    """
+    Returns the highest scoring activity for one date.
+    """
+
+    day_predictions = predictions[
+        predictions["date"] == forecast_date
+    ].copy()
+
+    if len(day_predictions) == 0:
+        return None
+
+    sort_column = (
+        "planning_score"
+        if "planning_score" in day_predictions.columns
+        else "predicted_score"
+    )
+
+    best_index = day_predictions[sort_column].idxmax()
+
+    return day_predictions.loc[best_index]
+
+
+def build_best_by_day_table(predictions, time_recommendations):
+    """
+    Builds a simple table showing the best activity for each date.
+    """
+
+    rows = []
+
+    for forecast_date in sorted(predictions["date"].unique()):
+        best_row = get_best_activity_for_date(predictions, forecast_date)
+
+        if best_row is None:
+            continue
+
+        recommended_window, window_score = get_recommended_window_for_activity(
+            time_recommendations=time_recommendations,
+            selected_date=forecast_date,
+            selected_activity=best_row["activity"],
+        )
+
+        rows.append({
+            "Date": forecast_date,
+            "Best Activity": best_row["activity"],
+            "Score": best_row["predicted_score"],
+            "Planning Score": best_row.get("planning_score"),
+            "Label": best_row["label"],
+            "Recommended Window": recommended_window,
+            "Weather Snapshot": (
+                f"{best_row.get('avg_temp', 'N/A')}°F, "
+                f"wind {best_row.get('wind_max', 'N/A')} mph, "
+                f"rain {best_row.get('rain_chance', 'N/A')}%"
+            ),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def get_top_activities_for_date(predictions, forecast_date, n=3):
+    """
+    Returns top N activities for a date.
+
+    Uses planning_score if available, otherwise predicted_score.
+    """
+
+    day_predictions = predictions[
+        predictions["date"] == forecast_date
+    ].copy()
+
+    sort_column = (
+        "planning_score"
+        if "planning_score" in day_predictions.columns
+        else "predicted_score"
+    )
+
+    return day_predictions.sort_values(
+        sort_column,
+        ascending=False,
+    ).head(n)
 
 def build_outdoor_outlook(predictions):
     """

@@ -491,6 +491,168 @@ home_tab, planner_tab, log_tab, scenario_tab, history_tab, manage_tab = st.tabs(
 
 activity_log = load_activity_log()
 
+def render_plan_to_log_form(selected_plan, selected_plan_id):
+    """
+    Renders a form that converts a planned activity into an activity log.
+
+    This creates an activity_logs row and marks the planned activity as Completed.
+    """
+
+    plan_already_logged = plan_has_activity_log(selected_plan_id)
+
+    if plan_already_logged:
+        st.success("This planned activity has already been logged.")
+        return
+
+    selected_plan_activity = selected_plan.get("activity")
+
+    if selected_plan.get("status") == "Completed":
+        st.warning(
+            "This plan is marked Completed, but no linked activity log was found. "
+            "You can still create a log below."
+        )
+
+    with st.expander("Create activity log from this plan", expanded=False):
+        planned_log_col1, planned_log_col2 = st.columns(2)
+
+        with planned_log_col1:
+            planned_actual_enjoyment = st.slider(
+                "Actual enjoyment",
+                min_value=1,
+                max_value=10,
+                value=7,
+                key=f"planned_log_enjoyment_{selected_plan_id}",
+            )
+
+            planned_did_i_go = st.selectbox(
+                "Did you go?",
+                options=["Yes", "No", "Partially"],
+                key=f"planned_log_did_go_{selected_plan_id}",
+            )
+
+            planned_actual_time = st.text_input(
+                "Actual time",
+                value="",
+                placeholder="Example: 7:30 AM or 6:00 PM",
+                key=f"planned_log_actual_time_{selected_plan_id}",
+            )
+
+            planned_followed_window = st.selectbox(
+                "Did you go during the planned/recommended window?",
+                options=["Not sure", "Yes", "No", "Partially"],
+                key=f"planned_log_followed_window_{selected_plan_id}",
+            )
+
+        with planned_log_col2:
+            planned_actual_bugs = st.slider(
+                "Actual bugs",
+                min_value=0,
+                max_value=10,
+                value=5,
+                key=f"planned_log_bugs_{selected_plan_id}",
+            )
+
+            planned_wind_annoyance = st.slider(
+                "Actual wind annoyance",
+                min_value=0,
+                max_value=10,
+                value=5,
+                key=f"planned_log_wind_{selected_plan_id}",
+            )
+
+            planned_humidity_comfort = st.slider(
+                "Actual humidity comfort",
+                min_value=0,
+                max_value=10,
+                value=7,
+                key=f"planned_log_humidity_{selected_plan_id}",
+            )
+
+        planned_ground_wetness = "Not applicable"
+        planned_water_conditions = "Not applicable"
+        planned_fish_activity = "Not applicable"
+        planned_visibility_light = "Not applicable"
+
+        if selected_plan_activity in ["Camping", "Running", "Disc Golf", "Tennis"]:
+            planned_ground_wetness = st.selectbox(
+                "Actual ground/course/trail condition",
+                options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
+                key=f"planned_log_ground_{selected_plan_id}",
+            )
+
+        if selected_plan_activity in FISHING_ACTIVITIES + ["Kayaking", "Beach Day"]:
+            planned_water_conditions = st.selectbox(
+                "Actual water conditions",
+                options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
+                key=f"planned_log_water_{selected_plan_id}",
+            )
+
+        if selected_plan_activity in FISHING_ACTIVITIES:
+            planned_fish_activity = st.selectbox(
+                "Fish activity",
+                options=["None", "Low", "Medium", "High", "Not sure"],
+                key=f"planned_log_fish_{selected_plan_id}",
+            )
+
+        if selected_plan_activity == "Running":
+            planned_visibility_light = st.selectbox(
+                "Visibility/light conditions",
+                options=["Bright daylight", "Low light but okay", "Too dark", "Not sure"],
+                key=f"planned_log_visibility_{selected_plan_id}",
+            )
+
+        existing_notes = selected_plan.get("notes", "")
+
+        if pd.isna(existing_notes):
+            existing_notes = ""
+
+        planned_notes = st.text_area(
+            "Notes",
+            value=str(existing_notes),
+            placeholder="How did it go?",
+            key=f"planned_log_notes_{selected_plan_id}",
+        )
+
+        if st.button(
+            "Save activity log from plan",
+            key=f"save_log_from_plan_{selected_plan_id}",
+            disabled=plan_already_logged,
+        ):
+            actual_score = planned_actual_enjoyment * 10
+
+            actual_data = {
+                "actual_time": planned_actual_time,
+                "followed_recommended_window": planned_followed_window,
+                "actual_enjoyment_1_to_10": planned_actual_enjoyment,
+                "actual_score_0_to_100": actual_score,
+                "did_i_go": planned_did_i_go,
+                "actual_bugs_1_to_10": planned_actual_bugs,
+                "actual_wind_annoyance_1_to_10": planned_wind_annoyance,
+                "actual_humidity_comfort_1_to_10": planned_humidity_comfort,
+                "actual_ground_wetness": planned_ground_wetness,
+                "actual_water_conditions": planned_water_conditions,
+                "fish_activity": planned_fish_activity,
+                "visibility_light": planned_visibility_light,
+                "notes": planned_notes,
+            }
+
+            try:
+                create_activity_log_from_plan(
+                    selected_plan,
+                    actual_data,
+                )
+
+                load_activity_log.clear()
+                load_planned_activities.clear()
+
+                st.success("Activity log created and plan marked as Completed.")
+                st.rerun()
+
+            except Exception as e:
+                st.error("Could not create activity log from plan.")
+                st.write(type(e).__name__)
+                st.write(e)
+
 # -------------------------
 # Display predictions
 # -------------------------
@@ -1565,540 +1727,475 @@ with home_tab:
                                     f"({best_species['label']})"
                                 )
 
+def render_planner_recommendation_card(
+    row,
+    time_recommendations,
+    saved_locations_df,
+    activity_location_defaults_df,
+    latitude,
+    longitude,
+    forecast_source,
+    weekly_obligations,
+    key_prefix,
+    expanded_details=False,
+):
+    """
+    Renders a compact planner recommendation card.
+
+    Includes:
+    - score
+    - planning/confidence
+    - suggested window
+    - location
+    - add to calendar
+    - save as planned
+    - expandable details
+    """
+
+    activity = row["activity"]
+    date_value = row["date"]
+
+    recommended_window, window_score = get_recommended_window_for_activity(
+        time_recommendations=time_recommendations,
+        selected_date=date_value,
+        selected_activity=activity,
+    )
+
+    default_location = get_default_location_for_activity(
+        activity=activity,
+        defaults_df=activity_location_defaults_df,
+        saved_locations_df=saved_locations_df,
+    )
+
+    if default_location is not None:
+        location_name = default_location.get("name", "")
+        location_context = build_location_context_from_location(default_location)
+    else:
+        location_name = ""
+        location_context = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "location_query": st.session_state.get("location_query"),
+        }
+
+    usgs_water_data = get_usgs_water_data_for_location(default_location)
+    usgs_water_summary = format_usgs_water_summary(usgs_water_data)
+
+    nws_alerts = get_nws_alerts_for_location(default_location)
+
+    ndbc_data = get_ndbc_buoy_data_for_location(default_location)
+    ndbc_summary = format_ndbc_buoy_summary(ndbc_data)
+
+    chop_summary = get_location_chop_summary(
+        location=default_location,
+        wind_speed=row.get("wind_max", 0),
+        wind_gust=row.get("gust_max", row.get("wind_max", 0)),
+    )
+
+    chop_summary_text = format_chop_summary(chop_summary)
+
+    is_water_activity = activity in [
+        "Fishing",
+        "Kayaking",
+        "Beach Day",
+    ]
+
+    data_quality_badges = build_data_quality_badges(
+        forecast_source=forecast_source,
+        default_location=default_location,
+        usgs_water_data=usgs_water_data,
+        ndbc_data=ndbc_data,
+        nws_alerts=nws_alerts,
+        chop_summary=chop_summary,
+        schedule_aware=len(weekly_obligations) > 0,
+        water_activity=is_water_activity,
+    )
+
+    with st.container(border=True):
+        top_col1, top_col2 = st.columns([2, 1])
+
+        with top_col1:
+            st.markdown(
+                f"### {activity_label(activity)}"
+            )
+
+            st.markdown(
+                score_badge_html(
+                    row["predicted_score"],
+                    row["label"],
+                ),
+                unsafe_allow_html=True,
+            )
+
+            render_data_quality_badges(data_quality_badges)
+
+            st.write(f"**Date:** {date_value}")
+            st.write(f"**Suggested window:** {recommended_window}")
+
+            if location_name:
+                st.write(f"**Location:** {location_name}")
+
+        with top_col2:
+            st.metric(
+                "Planning",
+                row.get("planning_score", "N/A"),
+                row.get("forecast_confidence_label", ""),
+            )
+
+            st.metric(
+                "Confidence",
+                row.get("forecast_confidence", "N/A"),
+            )
+
+        if activity == "Fishing":
+            species_breakdown = row.get("species_breakdown", [])
+
+            if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+                best_species = species_breakdown[0]
+
+                st.success(
+                    f"Best fishing target: {best_species['species']} "
+                    f"({best_species['score']} · {best_species['label']})"
+                )
+
+        action_col1, action_col2 = st.columns(2)
+
+        with action_col1:
+            try:
+                start_dt, end_dt = parse_time_window_for_calendar(
+                    date_value,
+                    recommended_window,
+                )
+
+                calendar_title = str(activity)
+
+                if activity == "Fishing":
+                    species_breakdown = row.get("species_breakdown", [])
+
+                    if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
+                        best_species = species_breakdown[0]
+                        calendar_title = f"Fishing - Target {best_species['species']}"
+
+                calendar_description = (
+                    f"Predicted score: {row['predicted_score']} ({row['label']})\n"
+                    f"Forecast confidence: {row.get('forecast_confidence', 'N/A')} "
+                    f"({row.get('forecast_confidence_label', 'N/A')})\n"
+                    f"Planning score: {row.get('planning_score', 'N/A')}\n"
+                    f"Recommended window: {recommended_window}\n\n"
+                    f"Why: {row['explanation']}\n\n"
+                    f"Gear/Safety: {row['gear_notes']}\n\n"
+                    f"Weather: {row.get('avg_temp', 'N/A')}°F, "
+                    f"wind {row.get('wind_max', 'N/A')} mph, "
+                    f"rain {row.get('rain_chance', 'N/A')}%, "
+                    f"bugs {row.get('bug_index', 'N/A')}, "
+                    f"estimated water temp {row.get('water_temp_est', 'N/A')}°F"
+                )
+
+                if usgs_water_summary:
+                    calendar_description += f"\nWater data: {usgs_water_summary}"
+
+                if ndbc_summary:
+                    calendar_description += f"\nBuoy data: {ndbc_summary}"
+
+                if chop_summary_text:
+                    calendar_description += f"\nWater chop estimate: {chop_summary_text}"
+
+                if len(nws_alerts) > 0:
+                    calendar_description += "\n\nActive alerts:\n"
+
+                    for alert in nws_alerts[:3]:
+                        calendar_description += f"- {alert.get('event')}: {alert.get('headline')}\n"
+
+                ics_file = create_calendar_event_ics(
+                    title=calendar_title,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    description=calendar_description,
+                    location=location_name,
+                )
+
+                st.download_button(
+                    label="Add to calendar",
+                    data=ics_file,
+                    file_name=f"{clean_filename(activity)}-{date_value}.ics",
+                    mime="text/calendar",
+                    key=f"{key_prefix}_calendar_{date_value}_{activity}",
+                )
+
+            except Exception:
+                st.caption("Calendar export unavailable.")
+
+        with action_col2:
+            plan_notes = st.text_area(
+                "Plan notes",
+                placeholder="Optional notes for this plan",
+                key=f"{key_prefix}_plan_notes_{date_value}_{activity}",
+            )
+
+            if st.button(
+                "Save as planned",
+                key=f"{key_prefix}_save_plan_{date_value}_{activity}",
+            ):
+                try:
+                    create_planned_activity_from_prediction(
+                        prediction_row=row,
+                        recommended_window=recommended_window,
+                        notes=plan_notes,
+                        location_name=location_name,
+                        location_context=location_context,
+                    )
+
+                    st.success("Activity saved as planned.")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error("Could not save planned activity.")
+                    st.write(type(e).__name__)
+                    st.write(e)
+
+        with st.expander("Details", expanded=expanded_details):
+            st.write(f"**Warnings:** {dashboard_warning_text(row)}")
+
+            st.write("**Why this is recommended:**")
+            st.write(row["explanation"])
+
+            st.write("**Gear / Safety Notes:**")
+            st.write(row["gear_notes"])
+
+            st.write(
+                f"**Weather:** {row.get('avg_temp', 'N/A')}°F, "
+                f"wind {row.get('wind_max', 'N/A')} mph, "
+                f"rain {row.get('rain_chance', 'N/A')}%, "
+                f"bugs {row.get('bug_index', 'N/A')}, "
+                f"estimated water temp {row.get('water_temp_est', 'N/A')}°F"
+            )
+
+            if usgs_water_summary:
+                st.write(f"**Water data:** {usgs_water_summary}")
+
+            if ndbc_summary:
+                st.write(f"**Buoy data:** {ndbc_summary}")
+
+            if chop_summary_text:
+                st.write(f"**Water chop estimate:** {chop_summary_text}")
+
+            if len(nws_alerts) > 0:
+                st.warning("Active weather alerts for this location:")
+
+                for alert in nws_alerts[:3]:
+                    st.write(
+                        f"**{alert.get('event')}** — {alert.get('headline')}"
+                    )
+
 with planner_tab:
     st.header("Planner")
 
     st.write(
-        "Plan your week and track how the forecast changes before your activity."
+        "Choose a day to plan around, or find the best day for a specific activity."
     )
 
-    planner_dates = sorted(
-        predictions["date"]
+    planner_mode = st.radio(
+        "Planner mode",
+        options=["Choose a Day", "Choose an Activity"],
+        horizontal=True,
+        key="planner_mode_selector",
+    )
+
+    planner_predictions = predictions.copy()
+
+    sort_column = (
+        "planning_score"
+        if "planning_score" in planner_predictions.columns
+        else "predicted_score"
+    )
+
+    saved_locations_for_planner = load_saved_locations()
+    activity_location_defaults_for_planner = load_activity_location_defaults()
+
+    available_planner_dates = sorted(
+        planner_predictions["date"]
         .dropna()
         .unique()
         .tolist()
     )
 
-    if len(planner_dates) == 0:
+    if len(available_planner_dates) == 0:
         st.info("No forecast dates are available.")
 
     else:
         # -------------------------
-        # Planner controls
+        # Plan by Day
         # -------------------------
 
-        control_col1, control_col2, control_col3 = st.columns(3)
+        if planner_mode == "Choose a Day":
+            today_string = pd.Timestamp.today().strftime("%Y-%m-%d")
 
-        with control_col1:
-            planner_view = st.radio(
-                "View",
-                options=["Week", "Weekend"],
-                horizontal=True,
-                key="planner_view_mode",
+            if today_string in available_planner_dates:
+                default_day_index = available_planner_dates.index(today_string)
+            else:
+                default_day_index = 0
+
+            selected_planner_date = st.selectbox(
+                "Choose day",
+                options=available_planner_dates,
+                index=default_day_index,
+                format_func=lambda value: pd.to_datetime(value).strftime("%A, %b %d"),
+                key="planner_day_selector",
             )
 
-        with control_col2:
-            activity_group = st.selectbox(
-                "Activity group",
-                options=[
-                    "All",
-                    "Water",
-                    "Land",
-                    "Fishing only",
-                ],
-                key="planner_activity_group",
-            )
+            day_rows = planner_predictions[
+                planner_predictions["date"] == selected_planner_date
+            ].copy()
 
-        with control_col3:
-            minimum_planning_score = st.slider(
-                "Minimum planning score",
-                min_value=0,
-                max_value=100,
-                value=60,
-                step=5,
-                key="planner_minimum_planning_score",
-            )
+            if len(day_rows) == 0:
+                st.info("No activities available for this day.")
 
-        planner_predictions = predictions.copy()
-
-        if planner_view == "Weekend":
-            planner_predictions = get_weekend_predictions(
-                planner_predictions
-            )
-
-        if activity_group == "Water":
-            water_activities = ["Fishing", "Kayaking", "Beach Day"]
-            planner_predictions = planner_predictions[
-                planner_predictions["activity"].isin(water_activities)
-            ]
-
-        elif activity_group == "Land":
-            land_activities = [
-                "Camping",
-                "Running",
-                "Disc Golf",
-                "Tennis",
-            ]
-            planner_predictions = planner_predictions[
-                planner_predictions["activity"].isin(land_activities)
-            ]
-
-        elif activity_group == "Fishing only":
-            planner_predictions = planner_predictions[
-                planner_predictions["activity"] == "Fishing"
-            ]
-
-        sort_column = (
-            "planning_score"
-            if "planning_score" in planner_predictions.columns
-            else "predicted_score"
-        )
-
-        if len(planner_predictions) > 0:
-            planner_predictions = planner_predictions[
-                planner_predictions[sort_column] >= minimum_planning_score
-            ]
-
-        if len(planner_predictions) == 0:
-            st.info("No predictions match this planner view and minimum score.")
-
-        else:
-            # -------------------------
-            # Best opportunities
-            # -------------------------
-
-            saved_locations_for_planner = load_saved_locations()
-            activity_location_defaults_for_planner = load_activity_location_defaults()
-
-            st.subheader("Best Opportunities")
-
-            top_opportunity_count = st.slider(
-                "Number of opportunities to show",
-                min_value=3,
-                max_value=10,
-                value=5,
-                step=1,
-                key="planner_top_opportunity_count",
-            )
-
-            top_opportunities = planner_predictions.sort_values(
-                sort_column,
-                ascending=False,
-            ).head(top_opportunity_count)
-
-            for _, row in top_opportunities.iterrows():
-                recommended_window, window_score = get_recommended_window_for_activity(
-                    time_recommendations=time_recommendations,
-                    selected_date=row["date"],
-                    selected_activity=row["activity"],
-                )
-
-                default_location = get_default_location_for_activity(
-                    activity=row["activity"],
-                    defaults_df=activity_location_defaults_for_planner,
-                    saved_locations_df=saved_locations_for_planner,
-                )
-
-                if default_location is not None:
-                    planner_location_name = default_location.get("name", "")
-                    planner_location_context = build_location_context_from_location(
-                        default_location
-                    )
-                else:
-                    planner_location_name = ""
-                    planner_location_context = {
-                        "latitude": latitude,
-                        "longitude": longitude,
-                        "location_query": st.session_state.get("location_query"),
-                    }
-
-                usgs_water_data = get_usgs_water_data_for_location(default_location)
-                usgs_water_summary = format_usgs_water_summary(usgs_water_data)
-
-                nws_alerts = get_nws_alerts_for_location(default_location)
-
-                ndbc_data = get_ndbc_buoy_data_for_location(default_location)
-                ndbc_summary = format_ndbc_buoy_summary(ndbc_data)
-
-                chop_summary = get_location_chop_summary(
-                    location=default_location,
-                    wind_speed=row.get("wind_max", 0),
-                    wind_gust=row.get("gust_max", row.get("wind_max", 0)),
-                )
-
-                chop_summary_text = format_chop_summary(chop_summary)
-
-                planner_is_water_activity = row["activity"] in [
-                    "Fishing",
-                    "Kayaking",
-                    "Beach Day",
-                ]
-
-                planner_data_quality_badges = build_data_quality_badges(
-                    forecast_source=forecast_source,
-                    default_location=default_location,
-                    usgs_water_data=usgs_water_data,
-                    ndbc_data=ndbc_data,
-                    nws_alerts=nws_alerts,
-                    chop_summary=chop_summary,
-                    schedule_aware=len(weekly_obligations) > 0,
-                    water_activity=planner_is_water_activity,
-                )
-
-                with st.container(border=True):
-                    card_col1, card_col2 = st.columns([2, 1])
-
-                    with card_col1:
-                        st.subheader(
-                            f"{activity_label(row['activity'])} — {row['date']}"
-                        )
-
-                        st.markdown(
-                            score_badge_html(
-                                row["predicted_score"],
-                                row["label"],
-                            ),
-                            unsafe_allow_html=True,
-                        )
-
-                        render_data_quality_badges(planner_data_quality_badges)
-
-                        st.write(f"**Suggested window:** {recommended_window}")
-
-                        if planner_location_name:
-                            st.write(f"**Location:** {planner_location_name}")
-
-                        if usgs_water_summary:
-                            st.write(f"**Water data:** {usgs_water_summary}")
-
-                        if ndbc_summary:
-                            st.write(f"**Buoy data:** {ndbc_summary}")
-
-                        if chop_summary_text and row["activity"] in ["Fishing", "Kayaking", "Beach Day"]:
-                            st.write(f"**Water chop estimate:** {chop_summary_text}")
-
-                        if len(nws_alerts) > 0:
-                            st.warning("Active weather alerts for this location:")
-
-                            for alert in nws_alerts[:2]:
-                                st.write(
-                                    f"**{alert.get('event')}** — {alert.get('headline')}"
-                                )
-
-                        st.write(
-                            f"**Planning score:** {row.get('planning_score', 'N/A')}"
-                        )
-
-                        st.write(
-                            f"**Forecast confidence:** "
-                            f"{row.get('forecast_confidence', 'N/A')} "
-                            f"({row.get('forecast_confidence_label', 'N/A')})"
-                        )
-
-                        st.write(f"**Warnings:** {dashboard_warning_text(row)}")
-
-                        if row["activity"] == "Fishing":
-                            species_breakdown = row.get("species_breakdown", [])
-
-                            if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
-                                best_species = species_breakdown[0]
-
-                                st.success(
-                                    f"Best fishing target: {best_species['species']} "
-                                    f"({best_species['score']} · {best_species['label']})"
-                                )
-
-                    with card_col2:
-                        try:
-                            start_dt, end_dt = parse_time_window_for_calendar(
-                                row["date"],
-                                recommended_window,
-                            )
-
-                            calendar_title = str(row["activity"])
-
-                            if row["activity"] == "Fishing":
-                                species_breakdown = row.get("species_breakdown", [])
-
-                                if isinstance(species_breakdown, list) and len(species_breakdown) > 0:
-                                    best_species = species_breakdown[0]
-                                    calendar_title = f"Fishing - Target {best_species['species']}"
-
-                            calendar_description = (
-                                f"Predicted score: {row['predicted_score']} ({row['label']})\n"
-                                f"Forecast confidence: {row.get('forecast_confidence', 'N/A')} "
-                                f"({row.get('forecast_confidence_label', 'N/A')})\n"
-                                f"Planning score: {row.get('planning_score', 'N/A')}\n"
-                                f"Recommended window: {recommended_window}\n\n"
-                                f"Why: {row['explanation']}\n\n"
-                                f"Gear/Safety: {row['gear_notes']}\n\n"
-                                f"Weather: {row.get('avg_temp', 'N/A')}°F, "
-                                f"wind {row.get('wind_max', 'N/A')} mph, "
-                                f"rain {row.get('rain_chance', 'N/A')}%, "
-                                f"bugs {row.get('bug_index', 'N/A')}, "
-                                f"estimated water temp {row.get('water_temp_est', 'N/A')}°F"
-                            )
-
-                            if usgs_water_summary:
-                                calendar_description += f"\nWater data: {usgs_water_summary}"
-                            
-                            if ndbc_summary:
-                                calendar_description += f"\nBuoy data: {ndbc_summary}"
-
-                            if chop_summary_text:
-                                calendar_description += f"\nWater chop estimate: {chop_summary_text}"
-
-                            if len(nws_alerts) > 0:
-                                calendar_description += "\n\nActive alerts:\n"
-
-                                for alert in nws_alerts[:3]:
-                                    calendar_description += f"- {alert.get('event')}: {alert.get('headline')}\n"
-
-                            ics_file = create_calendar_event_ics(
-                                title=calendar_title,
-                                start_dt=start_dt,
-                                end_dt=end_dt,
-                                description=calendar_description,
-                                location=planner_location_name,
-                            )
-
-                            filename = (
-                                f"{clean_filename(row['activity'])}-"
-                                f"{row['date']}.ics"
-                            )
-
-                            st.download_button(
-                                label="Add to calendar",
-                                data=ics_file,
-                                file_name=filename,
-                                mime="text/calendar",
-                                key=f"planner_calendar_{row['date']}_{row['activity']}",
-                            )
-
-                        except Exception:
-                            st.caption("Calendar export unavailable.")
-
-                        plan_notes = st.text_area(
-                            "Plan notes",
-                            placeholder="Optional notes for this plan",
-                            key=f"planner_notes_{row['date']}_{row['activity']}",
-                        )
-
-                        if st.button(
-                            "Save as planned",
-                            key=f"save_plan_{row['date']}_{row['activity']}",
-                        ):
-                            try:
-                                create_planned_activity_from_prediction(
-                                    prediction_row=row,
-                                    recommended_window=recommended_window,
-                                    notes=plan_notes,
-                                    location_name=planner_location_name,
-                                    location_context=planner_location_context,
-                                )
-
-                                st.success("Activity saved as planned.")
-                                st.rerun()
-
-                            except Exception as e:
-                                st.error("Could not save planned activity.")
-                                st.write(type(e).__name__)
-                                st.write(e)
-
-            # -------------------------
-            # Calendar-style day cards
-            # -------------------------
-
-            st.subheader("Calendar View")
-
-            for planner_date in sorted(planner_predictions["date"].unique()):
-                day_rows = planner_predictions[
-                    planner_predictions["date"] == planner_date
-                ].copy()
-
-                if len(day_rows) == 0:
-                    continue
-
+            else:
                 day_rows = day_rows.sort_values(
                     sort_column,
                     ascending=False,
                 ).reset_index(drop=True)
 
-                best = day_rows.iloc[0]
-                alternatives = day_rows.iloc[1:3]
+                top_pick = day_rows.iloc[0]
+                other_options = day_rows.iloc[1:]
 
-                recommended_window, _ = get_recommended_window_for_activity(
+                st.subheader("Top Pick")
+
+                render_planner_recommendation_card(
+                    row=top_pick,
                     time_recommendations=time_recommendations,
-                    selected_date=best["date"],
-                    selected_activity=best["activity"],
-                )
-
-                best_default_location = get_default_location_for_activity(
-                    activity=best["activity"],
-                    defaults_df=activity_location_defaults_for_planner,
                     saved_locations_df=saved_locations_for_planner,
+                    activity_location_defaults_df=activity_location_defaults_for_planner,
+                    latitude=latitude,
+                    longitude=longitude,
+                    forecast_source=forecast_source,
+                    weekly_obligations=weekly_obligations,
+                    key_prefix=f"planner_top_pick_{selected_planner_date}",
+                    expanded_details=False,
                 )
 
-                if best_default_location is not None:
-                    best_location_name = best_default_location.get("name", "")
-                else:
-                    best_location_name = ""
+                if len(other_options) > 0:
+                    st.subheader("Other Options")
 
-                best_usgs_water_data = get_usgs_water_data_for_location(
-                    best_default_location
-                )
-
-                best_usgs_water_summary = format_usgs_water_summary(
-                    best_usgs_water_data
-                )
-
-                best_nws_alerts = get_nws_alerts_for_location(
-                    best_default_location
-                )
-
-                with st.container(border=True):
-                    st.markdown(
-                        f"### {planner_date}: {activity_label(best['activity'])}"
-                    )
-
-                    day_col1, day_col2, day_col3 = st.columns(3)
-
-                    with day_col1:
-                        st.markdown(
-                            score_badge_html(
-                                best["predicted_score"],
-                                best["label"],
-                            ),
-                            unsafe_allow_html=True,
-                        )
-
-                    with day_col2:
-                        st.metric(
-                            "Planning",
-                            best.get("planning_score", "N/A"),
-                            best.get("forecast_confidence_label", ""),
-                        )
-
-                    with day_col3:
-                        st.metric(
-                            "Window",
-                            recommended_window,
-                        )
-
-                    if best_location_name:
-                        st.write(f"**Location:** {best_location_name}")
-
-                    if best_usgs_water_summary:
-                        st.write(f"**Water data:** {best_usgs_water_summary}")
-
-                    if len(best_nws_alerts) > 0:
-                        st.warning("Active weather alerts for this location:")
-
-                        for alert in best_nws_alerts[:2]:
-                            st.write(
-                                f"**{alert.get('event')}** — {alert.get('headline')}"
-                            )
-
-                    st.write(f"**Warnings:** {dashboard_warning_text(best)}")
-
-                    if len(alternatives) > 0:
-                        alt_text = []
-
-                        for _, alt in alternatives.iterrows():
-                            alt_text.append(
-                                f"{activity_label(alt['activity'])} "
-                                f"{int(alt['predicted_score'])}"
-                            )
-
-                        st.caption(
-                            "Other options: " + " · ".join(alt_text)
-                        )
-
-                    with st.expander("View all activity details", expanded=False):
-                        for _, detail_row in day_rows.iterrows():
-                            detail_window, detail_window_score = get_recommended_window_for_activity(
+                    for _, option_row in other_options.iterrows():
+                        with st.expander(
+                            f"{activity_label(option_row['activity'])} — "
+                            f"{option_row['predicted_score']} ({option_row['label']})",
+                            expanded=False,
+                        ):
+                            render_planner_recommendation_card(
+                                row=option_row,
                                 time_recommendations=time_recommendations,
-                                selected_date=detail_row["date"],
-                                selected_activity=detail_row["activity"],
-                            )
-
-                            detail_default_location = get_default_location_for_activity(
-                                activity=detail_row["activity"],
-                                defaults_df=activity_location_defaults_for_planner,
                                 saved_locations_df=saved_locations_for_planner,
+                                activity_location_defaults_df=activity_location_defaults_for_planner,
+                                latitude=latitude,
+                                longitude=longitude,
+                                forecast_source=forecast_source,
+                                weekly_obligations=weekly_obligations,
+                                key_prefix=f"planner_option_{selected_planner_date}_{option_row['activity']}",
+                                expanded_details=False,
                             )
 
-                            detail_usgs_water_data = get_usgs_water_data_for_location(
-                                detail_default_location
-                            )
+        # -------------------------
+        # Best Day by Activity
+        # -------------------------
 
-                            detail_usgs_water_summary = format_usgs_water_summary(
-                                detail_usgs_water_data
-                            )
+        elif planner_mode == "Choose an Activity":
+            st.subheader("Best Day by Activity")
 
-                            st.markdown(
-                                f"**{activity_label(detail_row['activity'])}: "
-                                f"{detail_row['predicted_score']} "
-                                f"({detail_row['label']})**"
-                            )
-
-                            st.write(f"Suggested window: {detail_window}")
-
-                            st.write(
-                                f"Planning score: "
-                                f"{detail_row.get('planning_score', 'N/A')}"
-                            )
-
-                            st.write(
-                                f"Forecast confidence: "
-                                f"{detail_row.get('forecast_confidence', 'N/A')} "
-                                f"({detail_row.get('forecast_confidence_label', 'N/A')})"
-                            )
-
-                            st.write(
-                                f"Weather: {detail_row.get('avg_temp', 'N/A')}°F, "
-                                f"wind {detail_row.get('wind_max', 'N/A')} mph, "
-                                f"rain {detail_row.get('rain_chance', 'N/A')}%, "
-                                f"bugs {detail_row.get('bug_index', 'N/A')}"
-                            )
-
-                            if detail_usgs_water_summary:
-                                st.write(f"Water data: {detail_usgs_water_summary}")
-                            else:
-                                st.write(
-                                    f"Estimated water temp: "
-                                    f"{detail_row.get('water_temp_est', 'N/A')}°F"
-                                )
-
-                            st.write(detail_row["explanation"])
-
-                            st.markdown("---")
-
-            # -------------------------
-            # Best day by activity
-            # -------------------------
-
-            st.subheader("Best Day for Each Activity")
-
-            best_day_by_activity = build_best_day_by_activity(
-                planner_predictions
+            st.write(
+                "Choose an activity to find the best day and suggested window for it."
             )
 
-            if len(best_day_by_activity) == 0:
-                st.info("No best-day activity data available.")
+            activity_options = sorted(
+                planner_predictions["activity"]
+                .dropna()
+                .unique()
+                .tolist()
+            )
+
+            if len(activity_options) == 0:
+                st.info("No activities are available.")
 
             else:
-                st.dataframe(
-                    best_day_by_activity,
-                    width="stretch",
+                selected_best_day_activity = st.selectbox(
+                    "Choose activity",
+                    options=activity_options,
+                    key="best_day_activity_selectbox",
+                    format_func=activity_label,
                 )
 
-        # -------------------------
-        # Planned activities
-        # -------------------------
+                activity_rows = planner_predictions[
+                    planner_predictions["activity"] == selected_best_day_activity
+                ].copy()
 
-        st.subheader("Planned Activities")
+                if len(activity_rows) == 0:
+                    st.info("No forecast days are available for this activity.")
 
+                else:
+                    activity_rows = activity_rows.sort_values(
+                        sort_column,
+                        ascending=False,
+                    ).reset_index(drop=True)
+
+                    best_row = activity_rows.iloc[0]
+
+                    st.write("### Best Option")
+
+                    render_planner_recommendation_card(
+                        row=best_row,
+                        time_recommendations=time_recommendations,
+                        saved_locations_df=saved_locations_for_planner,
+                        activity_location_defaults_df=activity_location_defaults_for_planner,
+                        latitude=latitude,
+                        longitude=longitude,
+                        forecast_source=forecast_source,
+                        weekly_obligations=weekly_obligations,
+                        key_prefix=f"best_day_{best_row['activity']}_{best_row['date']}",
+                        expanded_details=False,
+                    )
+
+                    st.write("### Other Days for This Activity")
+
+                    other_days = activity_rows.iloc[1:]
+
+                    if len(other_days) == 0:
+                        st.info("No other forecast days available for this activity.")
+
+                    else:
+                        for _, other_row in other_days.iterrows():
+                            other_window, other_window_score = get_recommended_window_for_activity(
+                                time_recommendations=time_recommendations,
+                                selected_date=other_row["date"],
+                                selected_activity=other_row["activity"],
+                            )
+
+                            expander_title = (
+                                f"{pd.to_datetime(other_row['date']).strftime('%A, %b %d')} — "
+                                f"{other_row['predicted_score']} ({other_row['label']})"
+                            )
+
+                            with st.expander(expander_title, expanded=False):
+                                render_planner_recommendation_card(
+                                    row=other_row,
+                                    time_recommendations=time_recommendations,
+                                    saved_locations_df=saved_locations_for_planner,
+                                    activity_location_defaults_df=activity_location_defaults_for_planner,
+                                    latitude=latitude,
+                                    longitude=longitude,
+                                    forecast_source=forecast_source,
+                                    weekly_obligations=weekly_obligations,
+                                    key_prefix=f"other_day_{other_row['activity']}_{other_row['date']}",
+                                    expanded_details=False,
+                                )
+
+    # -------------------------
+    # Planned activities
+    # -------------------------
+
+    st.markdown("---")
+
+    with st.expander("Planned Activities", expanded=False):
         plans = load_planned_activities()
 
         if len(plans) == 0:
@@ -2110,10 +2207,11 @@ with planner_tab:
                 predictions,
             )
 
-            st.dataframe(
-                plans_with_current.sort_values("planned_date"),
-                width="stretch",
-            )
+            with st.expander("View planned activities table", expanded=False):
+                st.dataframe(
+                    plans_with_current.sort_values("planned_date"),
+                    width="stretch",
+                )
 
             plans_with_current["display_label"] = (
                 plans_with_current["id"].astype(str)
@@ -2126,7 +2224,7 @@ with planner_tab:
             )
 
             selected_plan_label = st.selectbox(
-                "Choose planned activity to update",
+                "Choose planned activity to update/log",
                 options=plans_with_current["display_label"].tolist(),
                 key="planner_selected_plan",
             )
@@ -2163,6 +2261,7 @@ with planner_tab:
                         new_plan_status,
                     )
 
+                    load_planned_activities.clear()
                     st.success("Plan status updated.")
                     st.rerun()
 
@@ -2178,6 +2277,7 @@ with planner_tab:
                 ):
                     if confirm_delete_plan:
                         delete_planned_activity(selected_plan_id)
+                        load_planned_activities.clear()
                         st.success("Planned activity deleted.")
                         st.rerun()
                     else:
@@ -2186,140 +2286,10 @@ with planner_tab:
             st.markdown("---")
             st.subheader("Log This Planned Activity")
 
-            with st.expander("Create activity log from this plan", expanded=False):
-                planned_log_col1, planned_log_col2 = st.columns(2)
-
-                with planned_log_col1:
-                    planned_actual_enjoyment = st.slider(
-                        "Actual enjoyment",
-                        min_value=1,
-                        max_value=10,
-                        value=7,
-                        key=f"planned_log_enjoyment_{selected_plan_id}",
-                    )
-
-                    planned_did_i_go = st.selectbox(
-                        "Did you go?",
-                        options=["Yes", "No", "Partially"],
-                        key=f"planned_log_did_go_{selected_plan_id}",
-                    )
-
-                    planned_actual_time = st.text_input(
-                        "Actual time",
-                        value="",
-                        placeholder="Example: 7:30 AM or 6:00 PM",
-                        key=f"planned_log_actual_time_{selected_plan_id}",
-                    )
-
-                    planned_followed_window = st.selectbox(
-                        "Did you go during the planned/recommended window?",
-                        options=["Not sure", "Yes", "No", "Partially"],
-                        key=f"planned_log_followed_window_{selected_plan_id}",
-                    )
-
-                with planned_log_col2:
-                    planned_actual_bugs = st.slider(
-                        "Actual bugs",
-                        min_value=0,
-                        max_value=10,
-                        value=5,
-                        key=f"planned_log_bugs_{selected_plan_id}",
-                    )
-
-                    planned_wind_annoyance = st.slider(
-                        "Actual wind annoyance",
-                        min_value=0,
-                        max_value=10,
-                        value=5,
-                        key=f"planned_log_wind_{selected_plan_id}",
-                    )
-
-                    planned_humidity_comfort = st.slider(
-                        "Actual humidity comfort",
-                        min_value=0,
-                        max_value=10,
-                        value=7,
-                        key=f"planned_log_humidity_{selected_plan_id}",
-                    )
-
-                planned_ground_wetness = "Not applicable"
-                planned_water_conditions = "Not applicable"
-                planned_fish_activity = "Not applicable"
-                planned_visibility_light = "Not applicable"
-
-                selected_plan_activity = selected_plan.get("activity")
-
-                if selected_plan_activity in ["Camping", "Running", "Disc Golf", "Tennis"]:
-                    planned_ground_wetness = st.selectbox(
-                        "Actual ground/course/trail condition",
-                        options=["Dry", "Damp", "Muddy", "Very muddy", "Not sure"],
-                        key=f"planned_log_ground_{selected_plan_id}",
-                    )
-
-                if selected_plan_activity in FISHING_ACTIVITIES + ["Kayaking", "Beach Day"]:
-                    planned_water_conditions = st.selectbox(
-                        "Actual water conditions",
-                        options=["Calm", "Light chop", "Choppy", "Rough", "Unsafe", "Not sure"],
-                        key=f"planned_log_water_{selected_plan_id}",
-                    )
-
-                if selected_plan_activity in FISHING_ACTIVITIES:
-                    planned_fish_activity = st.selectbox(
-                        "Fish activity",
-                        options=["None", "Low", "Medium", "High", "Not sure"],
-                        key=f"planned_log_fish_{selected_plan_id}",
-                    )
-
-                if selected_plan_activity == "Running":
-                    planned_visibility_light = st.selectbox(
-                        "Visibility/light conditions",
-                        options=["Bright daylight", "Low light but okay", "Too dark", "Not sure"],
-                        key=f"planned_log_visibility_{selected_plan_id}",
-                    )
-
-                planned_notes = st.text_area(
-                    "Notes",
-                    value=selected_plan.get("notes", "") if pd.notna(selected_plan.get("notes", "")) else "",
-                    placeholder="How did it go?",
-                    key=f"planned_log_notes_{selected_plan_id}",
-                )
-
-                if st.button(
-                    "Save activity log from plan",
-                    key=f"save_log_from_plan_{selected_plan_id}",
-                    disabled=plan_already_logged,
-                ):
-                    actual_score = planned_actual_enjoyment * 10
-
-                    actual_data = {
-                        "actual_time": planned_actual_time,
-                        "followed_recommended_window": planned_followed_window,
-                        "actual_enjoyment_1_to_10": planned_actual_enjoyment,
-                        "actual_score_0_to_100": actual_score,
-                        "did_i_go": planned_did_i_go,
-                        "actual_bugs_1_to_10": planned_actual_bugs,
-                        "actual_wind_annoyance_1_to_10": planned_wind_annoyance,
-                        "actual_humidity_comfort_1_to_10": planned_humidity_comfort,
-                        "actual_ground_wetness": planned_ground_wetness,
-                        "actual_water_conditions": planned_water_conditions,
-                        "fish_activity": planned_fish_activity,
-                        "visibility_light": planned_visibility_light,
-                        "notes": planned_notes,
-                    }
-
-                    try:
-                        create_activity_log_from_plan(
-                            selected_plan,
-                            actual_data,
-                        )
-
-                        st.success("Activity log created and plan marked as Completed.")
-                        st.rerun()
-
-                    except Exception as e:
-                        st.error("Could not create activity log from plan.")
-                        st.write(type(e).__name__)
-                        st.write(e)
+            render_plan_to_log_form(
+                selected_plan=selected_plan,
+                selected_plan_id=selected_plan_id,
+            )
 
 # -------------------------
 # Log actual result
@@ -3821,3 +3791,11 @@ with manage_tab:
                         st.rerun()
                     else:
                         st.warning("Check the confirmation box before deleting.")
+
+            st.markdown("---")
+            st.subheader("Log This Planned Activity")
+
+            render_plan_to_log_form(
+                selected_plan=selected_plan,
+                selected_plan_id=selected_plan_id,
+            )
