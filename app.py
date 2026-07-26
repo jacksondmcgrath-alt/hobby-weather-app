@@ -501,7 +501,16 @@ def render_plan_to_log_form(selected_plan, selected_plan_id):
     plan_already_logged = plan_has_activity_log(selected_plan_id)
 
     if plan_already_logged:
-        st.success("This planned activity has already been logged.")
+        linked_log = get_activity_log_for_plan(selected_plan_id)
+
+        if linked_log is not None:
+            st.success(
+                f"This planned activity has already been logged with actual score "
+                f"{linked_log.get('actual_score_0_to_100')}."
+            )
+        else:
+            st.success("This planned activity has already been logged.")
+
         return
 
     selected_plan_activity = selected_plan.get("activity")
@@ -2236,9 +2245,28 @@ with planner_tab:
             selected_plan_id = int(selected_plan["id"])
 
             plan_already_logged = plan_has_activity_log(selected_plan_id)
+            linked_activity_log = get_activity_log_for_plan(selected_plan_id)
 
-            if plan_already_logged:
-                st.success("This planned activity has already been logged.")
+            st.markdown(
+                plan_status_badge_html(
+                    selected_plan.get("status"),
+                    plan_already_logged,
+                ),
+                unsafe_allow_html=True,
+            )
+
+            if plan_already_logged and linked_activity_log is not None:
+                st.success(
+                    f"Logged as {linked_activity_log.get('activity')} on "
+                    f"{linked_activity_log.get('date')} with actual score "
+                    f"{linked_activity_log.get('actual_score_0_to_100')}."
+                )
+
+            elif selected_plan.get("status") == "Completed" and not plan_already_logged:
+                st.warning(
+                    "This plan is marked Completed but does not have a linked activity log yet. "
+                    "Use the form below if you want this activity to count toward your history."
+                )
 
             status_col1, status_col2 = st.columns(2)
 
@@ -2251,6 +2279,12 @@ with planner_tab:
                     else 0,
                     key=f"planner_status_{selected_plan_id}",
                 )
+
+                if new_plan_status == "Completed" and not plan_already_logged:
+                    st.caption(
+                        "Marking a plan Completed does not create an activity log. "
+                        "Use 'Log This Planned Activity' below to add it to your history."
+                    )
 
                 if st.button(
                     "Update plan status",

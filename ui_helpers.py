@@ -150,6 +150,48 @@ def build_data_quality_badges(
 
     badges = []
 
+def plan_status_badge_html(plan_status, already_logged):
+    """
+    Creates a small badge describing plan/log state.
+    """
+
+    if already_logged:
+        label = "Already logged"
+        color = "#1f8f4d"
+
+    elif plan_status == "Completed":
+        label = "Completed, not logged"
+        color = "#d9822b"
+
+    elif plan_status == "Canceled":
+        label = "Canceled"
+        color = "#6c757d"
+
+    elif plan_status == "Maybe":
+        label = "Maybe"
+        color = "#2f80ed"
+
+    else:
+        label = "Not logged yet"
+        color = "#d9822b"
+
+    return f"""
+    <span style="
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background-color: {color};
+        color: white;
+        font-weight: 600;
+        font-size: 0.78rem;
+        line-height: 1.2;
+        white-space: nowrap;
+    ">
+        {label}
+    </span>
+    """
+
     # -------------------------
     # Forecast source
     # -------------------------

@@ -772,6 +772,36 @@ def plan_has_activity_log(plan_id):
     except Exception:
         return False
 
+def get_activity_log_for_plan(plan_id):
+    """
+    Gets the activity log linked to a planned activity, if one exists.
+    """
+
+    if plan_id is None:
+        return None
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("activity_logs")
+            .select("*")
+            .eq("planned_activity_id", int(plan_id))
+            .limit(1)
+            .execute()
+        )
+
+        rows = response.data
+
+        if rows is None or len(rows) == 0:
+            return None
+
+        return rows[0]
+
+    except Exception:
+        return None
+
 def create_planned_activity_from_prediction(
     prediction_row,
     recommended_window,
@@ -888,9 +918,10 @@ def create_activity_log_from_plan(plan, actual_data):
     Then updates the planned activity status to Completed.
     """
 
-    supabase = get_supabase_client()
-
     plan_id = plan.get("id")
+
+    if plan_id is not None:
+        plan_id = int(plan_id)
 
     if plan_id is not None and plan_has_activity_log(plan_id):
         raise ValueError("This planned activity has already been logged.")
