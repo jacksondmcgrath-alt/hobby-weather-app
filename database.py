@@ -478,6 +478,7 @@ def load_activity_log():
 
     columns = [
         "id",
+        "planned_activity_id",
         "logged_at",
         "date",
         "activity",
@@ -539,6 +540,7 @@ def save_log_entry(new_entry):
     supabase = get_supabase_client()
 
     allowed_columns = [
+        "planned_activity_id",
         "logged_at",
         "date",
         "activity",
@@ -563,6 +565,7 @@ def save_log_entry(new_entry):
     ]
 
     numeric_columns = [
+        "planned_activity_id",
         "predicted_score",
         "time_window_score",
         "actual_enjoyment_1_to_10",
@@ -742,6 +745,32 @@ def load_planned_activities():
         st.write(e)
         return pd.DataFrame(columns=columns)
 
+def plan_has_activity_log(plan_id):
+    """
+    Checks whether a planned activity already has an activity log.
+    """
+
+    if plan_id is None:
+        return False
+
+    try:
+        supabase = get_supabase_client()
+
+        response = (
+            supabase
+            .table("activity_logs")
+            .select("id")
+            .eq("planned_activity_id", int(plan_id))
+            .limit(1)
+            .execute()
+        )
+
+        rows = response.data
+
+        return rows is not None and len(rows) > 0
+
+    except Exception:
+        return False
 
 def create_planned_activity_from_prediction(
     prediction_row,
@@ -855,10 +884,16 @@ def create_activity_log_from_plan(plan, actual_data):
     """
     Creates an activity log entry from a planned activity.
 
+    Prevents duplicate logging by checking planned_activity_id.
     Then updates the planned activity status to Completed.
     """
 
     supabase = get_supabase_client()
+
+    plan_id = plan.get("id")
+
+    if plan_id is not None and plan_has_activity_log(plan_id):
+        raise ValueError("This planned activity has already been logged.")
 
     predicted_score = plan.get("score_at_planning")
     actual_score = actual_data.get("actual_score_0_to_100")
@@ -875,6 +910,7 @@ def create_activity_log_from_plan(plan, actual_data):
         absolute_error = None
 
     new_log = {
+        "planned_activity_id": plan_id,
         "logged_at": datetime.now().isoformat(timespec="seconds"),
         "date": plan.get("planned_date"),
         "activity": plan.get("activity"),
@@ -898,11 +934,7 @@ def create_activity_log_from_plan(plan, actual_data):
         "notes": actual_data.get("notes"),
     }
 
-    # Save log
     save_log_entry(new_log)
-
-    # Update plan status
-    plan_id = plan.get("id")
 
     if plan_id is not None:
         update_planned_activity_status(

@@ -13,6 +13,7 @@ from scoring import *
 from planner import *
 from scenarios import *
 from ui_helpers import *
+from ml_export import *
 
 
 st.set_page_config(
@@ -383,6 +384,7 @@ with st.spinner("Loading forecast and scoring activities..."):
         if cached_predictions is not None and cached_time_recommendations is not None:
             predictions = cached_predictions
             time_recommendations = cached_time_recommendations
+            forecast_source = "cached"
 
             st.caption("Using cached forecast from the last 2 hours.")
 
@@ -421,6 +423,8 @@ with st.spinner("Loading forecast and scoring activities..."):
                     obligations_df=weekly_obligations,
                 )
 
+                forecast_source = "fresh"
+
                 save_forecast_cache(
                     cache_key=forecast_cache_key,
                     latitude=latitude,
@@ -454,6 +458,7 @@ with st.spinner("Loading forecast and scoring activities..."):
                 if stale_predictions is not None and stale_time_recommendations is not None:
                     predictions = stale_predictions
                     time_recommendations = stale_time_recommendations
+                    forecast_source = "stale"
 
                     st.warning(
                         "Fresh weather data could not be loaded, so the app is using an older cached forecast."
@@ -467,6 +472,9 @@ with st.spinner("Loading forecast and scoring activities..."):
         st.error("Could not generate predictions.")
         st.write(e)
         st.stop()
+
+if "forecast_source" not in locals():
+    forecast_source = "unknown"        
 
 predictions = add_forecast_confidence(predictions)
 
@@ -1280,6 +1288,23 @@ with home_tab:
 
             home_chop_summary_text = format_chop_summary(home_chop_summary)
 
+            home_is_water_activity = top_pick["activity"] in [
+                "Fishing",
+                "Kayaking",
+                "Beach Day",
+            ]
+
+            home_data_quality_badges = build_data_quality_badges(
+                forecast_source=forecast_source,
+                default_location=home_default_location,
+                usgs_water_data=home_usgs_water_data,
+                ndbc_data=home_ndbc_data,
+                nws_alerts=home_nws_alerts,
+                chop_summary=home_chop_summary,
+                schedule_aware=len(weekly_obligations) > 0,
+                water_activity=home_is_water_activity,
+            )
+
             if home_default_location is not None:
                 home_location_name = home_default_location.get("name", "")
             else:
@@ -1311,6 +1336,8 @@ with home_tab:
                     ),
                     unsafe_allow_html=True,
                 )
+
+                render_data_quality_badges(home_data_quality_badges)
 
                 metric_col1, metric_col2, metric_col3 = st.columns(3)
 
@@ -1701,6 +1728,23 @@ with planner_tab:
 
                 chop_summary_text = format_chop_summary(chop_summary)
 
+                planner_is_water_activity = row["activity"] in [
+                    "Fishing",
+                    "Kayaking",
+                    "Beach Day",
+                ]
+
+                planner_data_quality_badges = build_data_quality_badges(
+                    forecast_source=forecast_source,
+                    default_location=default_location,
+                    usgs_water_data=usgs_water_data,
+                    ndbc_data=ndbc_data,
+                    nws_alerts=nws_alerts,
+                    chop_summary=chop_summary,
+                    schedule_aware=len(weekly_obligations) > 0,
+                    water_activity=planner_is_water_activity,
+                )
+
                 with st.container(border=True):
                     card_col1, card_col2 = st.columns([2, 1])
 
@@ -1716,6 +1760,8 @@ with planner_tab:
                             ),
                             unsafe_allow_html=True,
                         )
+
+                        render_data_quality_badges(planner_data_quality_badges)
 
                         st.write(f"**Suggested window:** {recommended_window}")
 
@@ -2091,6 +2137,11 @@ with planner_tab:
 
             selected_plan_id = int(selected_plan["id"])
 
+            plan_already_logged = plan_has_activity_log(selected_plan_id)
+
+            if plan_already_logged:
+                st.success("This planned activity has already been logged.")
+
             status_col1, status_col2 = st.columns(2)
 
             with status_col1:
@@ -2236,6 +2287,7 @@ with planner_tab:
                 if st.button(
                     "Save activity log from plan",
                     key=f"save_log_from_plan_{selected_plan_id}",
+                    disabled=plan_already_logged,
                 ):
                     actual_score = planned_actual_enjoyment * 10
 
@@ -2601,6 +2653,90 @@ with history_tab:
             mime="text/csv",
         )
 
+        st.subheader("ML Training Export")
+
+        with st.expander("Build and download ML training dataset", expanded=False):
+            st.write(
+                "This export combines scenario ratings and activity logs into a dataset "
+                "that can be used later for model experiments."
+            )
+
+            scenario_ratings_for_ml = load_scenario_ratings()
+
+            if "id" in scenario_ratings_for_ml.columns:
+                scenario_ratings_for_ml = scenario_ratings_for_ml.drop_duplicates(
+                    subset=["id"],
+                    keep="first",
+                ).reset_index(drop=True)
+
+            prediction_history_for_ml = load_prediction_history()
+
+            scenario_ml_dataset = build_scenario_ml_dataset(
+                scenario_ratings_for_ml
+            )
+
+            activity_ml_dataset = build_activity_log_ml_dataset(
+                activity_log,
+                prediction_history=prediction_history_for_ml,
+            )
+
+            combined_ml_dataset = build_combined_ml_dataset(
+                scenario_ratings=scenario_ratings_for_ml,
+                activity_log=activity_log,
+                prediction_history=prediction_history_for_ml,
+            )
+
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+            with metric_col1:
+                st.metric(
+                    "Scenario ML rows",
+                    len(scenario_ml_dataset),
+                )
+
+            with metric_col2:
+                st.metric(
+                    "Activity log ML rows",
+                    len(activity_ml_dataset),
+                )
+
+            with metric_col3:
+                st.metric(
+                    "Combined ML rows",
+                    len(combined_ml_dataset),
+                )
+
+            if len(combined_ml_dataset) == 0:
+                st.info("No ML training rows available yet.")
+
+            else:
+                st.dataframe(
+                    combined_ml_dataset.head(50),
+                    width="stretch",
+                )
+
+                st.download_button(
+                    label="Download combined ML dataset CSV",
+                    data=combined_ml_dataset.to_csv(index=False),
+                    file_name="ml_training_dataset.csv",
+                    mime="text/csv",
+                )
+
+            if len(scenario_ml_dataset) > 0:
+                st.download_button(
+                    label="Download scenario-only ML dataset CSV",
+                    data=scenario_ml_dataset.to_csv(index=False),
+                    file_name="scenario_ml_dataset.csv",
+                    mime="text/csv",
+                )
+
+            if len(activity_ml_dataset) > 0:
+                st.download_button(
+                    label="Download activity-log ML dataset CSV",
+                    data=activity_ml_dataset.to_csv(index=False),
+                    file_name="activity_log_ml_dataset.csv",
+                    mime="text/csv",
+                )
 
 with manage_tab:
     st.header("Manage")
