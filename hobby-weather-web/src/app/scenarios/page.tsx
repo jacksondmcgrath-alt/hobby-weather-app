@@ -280,6 +280,55 @@ export default function ScenariosPage() {
   const [editMessage, setEditMessage] = useState("");
   const [editError, setEditError] = useState("");
 
+  const totalScenarioRatings = ratings.length;
+
+  const averageScenarioRating =
+    ratings.length > 0
+      ? (
+          ratings.reduce((sum, item) => sum + (item.rating ?? 0), 0) /
+          ratings.length
+        ).toFixed(1)
+      : "N/A";
+
+  const averageScenarioConfidence =
+    ratings.length > 0
+      ? (
+          ratings.reduce(
+            (sum, item) => sum + (item.rater_confidence ?? 0),
+            0
+          ) / ratings.length
+        ).toFixed(1)
+      : "N/A";
+
+  const scenarioSummaryByActivity = ACTIVITY_OPTIONS.map((activityOption) => {
+    const activityRatings = ratings.filter(
+      (item) => item.activity === activityOption
+    );
+
+    const count = activityRatings.length;
+
+    const averageRating =
+      count > 0
+        ? (
+            activityRatings.reduce(
+              (sum, item) => sum + (item.rating ?? 0),
+              0
+            ) / count
+          ).toFixed(1)
+        : "N/A";
+
+    const goal = 25;
+    const progress = Math.min(count / goal, 1);
+
+    return {
+      activity: activityOption,
+      count,
+      averageRating,
+      goal,
+      progress,
+    };
+  });
+
   useEffect(() => {
     setScenario(generateScenario(activity));
   }, [activity]);
@@ -553,41 +602,45 @@ export default function ScenariosPage() {
         </header>
 
         <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Scenario Progress</h2>
+          <h2 className="text-xl font-semibold">Scenario Insights</h2>
 
-          <p className="mt-2 text-sm text-slate-300">
-            First target: 25 ratings per activity.
-          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div className="rounded-xl bg-slate-800 p-4">
+              <div className="text-3xl font-bold">{totalScenarioRatings}</div>
+              <div className="text-sm text-slate-300">Total ratings</div>
+            </div>
 
-          <div className="mt-4 grid gap-3">
-            {ACTIVITY_OPTIONS.map((activityOption) => {
-              const count = ratings.filter(
-                (item) => item.activity === activityOption
-              ).length;
+            <div className="rounded-xl bg-slate-800 p-4">
+              <div className="text-3xl font-bold">{averageScenarioRating}</div>
+              <div className="text-sm text-slate-300">Average rating</div>
+            </div>
 
-              const goal = 25;
-              const progress = Math.min(count / goal, 1);
+            <div className="rounded-xl bg-slate-800 p-4">
+              <div className="text-3xl font-bold">{averageScenarioConfidence}</div>
+              <div className="text-sm text-slate-300">Average confidence</div>
+            </div>
+          </div>
 
-              return (
-                <div key={activityOption}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span>{activityOption}</span>
-                    <span className="text-slate-300">
-                      {count}/{goal}
-                    </span>
-                  </div>
-
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-blue-500"
-                      style={{
-                        width: `${Math.round(progress * 100)}%`,
-                      }}
-                    />
-                  </div>
+          <div className="mt-6 grid gap-3">
+            {scenarioSummaryByActivity.map((item) => (
+              <div key={item.activity}>
+                <div className="mb-1 flex items-center justify-between text-sm">
+                  <span>{item.activity}</span>
+                  <span className="text-slate-300">
+                    {item.count}/{item.goal} · avg {item.averageRating}
+                  </span>
                 </div>
-              );
-            })}
+
+                <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-blue-500"
+                    style={{
+                      width: `${Math.round(item.progress * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 

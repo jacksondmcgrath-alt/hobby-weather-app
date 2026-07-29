@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
-import { ACTIVITY_OPTIONS } from "@/lib/activityMeta";
+import { ACTIVITY_OPTIONS, activityLabel } from "@/lib/activityMeta";
 
 type SavedLocation = {
   id: number;
   name: string | null;
   location_type: string | null;
+  water_type: string | null;
 };
 
 type ActivityDefault = {
@@ -25,7 +26,13 @@ export default function ActivityDefaultsPage() {
   const [locations, setLocations] = useState<SavedLocation[]>([]);
   const [defaults, setDefaults] = useState<ActivityDefault[]>([]);
 
+  const [selectedDefaults, setSelectedDefaults] = useState<Record<string, string>>(
+    {}
+  );
+
   const [loading, setLoading] = useState(false);
+  const [workingActivity, setWorkingActivity] = useState<string | null>(null);
+
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -33,12 +40,22 @@ export default function ActivityDefaultsPage() {
     if (!user) {
       setLocations([]);
       setDefaults([]);
+      setSelectedDefaults({});
       return;
     }
 
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  const configuredCount = useMemo(() => {
+    return ACTIVITY_OPTIONS.filter((activity) => {
+      const value = selectedDefaults[activity];
+      return value !== undefined && value !== "";
+    }).length;
+  }, [selectedDefaults]);
+
+  const missingCount = ACTIVITY_OPTIONS.length - configuredCount;
 
   async function loadData() {
     if (!user) return;
@@ -48,7 +65,7 @@ export default function ActivityDefaultsPage() {
 
     const { data: locationData, error: locationError } = await supabase
       .from("saved_locations")
-      .select("id,name,location_type")
+      .select("id,name,location_type,water_type")
       .eq("user_id", user.id)
       .order("name", { ascending: true });
 
@@ -69,21 +86,58 @@ export default function ActivityDefaultsPage() {
       return;
     }
 
-    setLocations(locationData ?? []);
-    setDefaults(defaultData ?? []);
+    const loadedLocations = locationData ?? [];
+    const loadedDefaults = defaultData ?? [];
+
+    setLocations(loadedLocations);
+    setDefaults(loadedDefaults);
+
+    const defaultMap: Record<string, string> = {};
+
+    for (const activity of ACTIVITY_OPTIONS) {
+      const match = loadedDefaults.find(
+        (item) => item.activity === activity
+      );
+
+      defaultMap[activity] =
+        match?.saved_location_id !== null &&
+        match?.saved_location_id !== undefined
+          ? String(match.saved_location_id)
+          : "";
+    }
+
+    setSelectedDefaults(defaultMap);
+
     setLoading(false);
   }
 
-  function getDefaultLocationId(activity: string) {
-    const match = defaults.find((item) => item.activity === activity);
-    return match?.saved_location_id ?? "";
+  function getLocationLabel(locationId: string) {
+    if (locationId === "") return "No default";
+
+    const location = locations.find(
+      (item) => String(item.id) === String(locationId)
+    );
+
+    if (!location) return "Unknown location";
+
+    return `${location.name ?? "Unnamed location"} (${location.location_type ?? "Location"})`;
   }
 
-  async function saveDefault(activity: string, savedLocationId: string) {
+  function updateSelectedDefault(activity: string, locationId: string) {
+    setSelectedDefaults((current) => ({
+      ...current,
+      [activity]: locationId,
+    }));
+  }
+
+  async function saveDefault(activity: string) {
     if (!user) return;
 
+    setWorkingActivity(activity);
     setMessage("");
     setErrorMessage("");
+
+    const savedLocationId = selectedDefaults[activity] ?? "";
 
     if (savedLocationId === "") {
       const { error } = await supabase
@@ -94,11 +148,13 @@ export default function ActivityDefaultsPage() {
 
       if (error) {
         setErrorMessage(error.message);
+        setWorkingActivity(null);
         return;
       }
 
       setMessage(`Removed default location for ${activity}.`);
       await loadData();
+      setWorkingActivity(null);
       return;
     }
 
@@ -117,11 +173,39 @@ export default function ActivityDefaultsPage() {
 
     if (error) {
       setErrorMessage(error.message);
+      setWorkingActivity(null);
       return;
     }
 
     setMessage(`Saved default location for ${activity}.`);
     await loadData();
+    setWorkingActivity(null);
+  }
+
+  async function clearDefault(activity: string) {
+    if (!user) return;
+
+    setWorkingActivity(activity);
+    setMessage("");
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("activity_location_defaults")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("activity", activity);
+
+    if (error) {
+      setErrorMessage(error.message);
+      setWorkingActivity(null);
+      return;
+    }
+
+    updateSelectedDefault(activity, "");
+    setMessage(`Cleared default location for ${activity}.`);
+
+    await loadData();
+    setWorkingActivity(null);
   }
 
   if (authLoading) {
@@ -151,14 +235,12 @@ export default function ActivityDefaultsPage() {
       <div className="mx-auto max-w-4xl">
         <NavBar />
 
-        <h1 className="text-3xl font-bold">Activity Defaults</h1>
-        <p className="mt-2 text-slate-300">
-          Choose which saved location should be used by default for each activity.
-        </p>
-
-        {loading && (
-          <p className="mt-6 text-slate-300">Loading defaults...</p>
-        )}
+        <header>
+          <h1 className="text-3xl font-bold">Activity Defaults</h1>
+          <p className="mt-2 text-slate-300">
+            Choose which saved location should be used by default for each activity.
+          </p>
+        </header>
 
         {message && (
           <div className="mt-6 rounded-lg bg-green-900/50 p-3 text-green-200">
@@ -172,50 +254,120 @@ export default function ActivityDefaultsPage() {
           </div>
         )}
 
+        {loading && (
+          <p className="mt-6 text-slate-300">Loading activity defaults...</p>
+        )}
+
+        <section className="mt-8 grid gap-4 sm:grid-cols-3">
+          <SummaryCard
+            label="Activities"
+            value={ACTIVITY_OPTIONS.length}
+          />
+
+          <SummaryCard
+            label="Configured"
+            value={configuredCount}
+          />
+
+          <SummaryCard
+            label="Missing"
+            value={missingCount}
+          />
+        </section>
+
         {locations.length === 0 ? (
-          <div className="mt-8 rounded-2xl bg-slate-900 p-5 text-slate-300">
-            Add saved locations first before setting activity defaults.
-          </div>
+          <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
+            <h2 className="text-xl font-semibold">No saved locations yet</h2>
+            <p className="mt-2 text-slate-300">
+              Add saved locations before setting defaults.
+            </p>
+
+            <a
+              href="/locations"
+              className="mt-4 inline-block rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400"
+            >
+              Add locations
+            </a>
+          </section>
         ) : (
-          <section className="mt-8 grid gap-3">
+          <section className="mt-8 grid gap-4">
             {ACTIVITY_OPTIONS.map((activity) => {
-              const currentValue = getDefaultLocationId(activity);
+              const selectedLocationId = selectedDefaults[activity] ?? "";
+              const hasDefault = selectedLocationId !== "";
 
               return (
                 <div
                   key={activity}
-                  className="rounded-xl border border-slate-700 bg-slate-900 p-4"
+                  className="rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow"
                 >
-                  <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-center">
-                    <div className="font-semibold">{activity}</div>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-semibold">
+                        {activityLabel(activity)}
+                      </h2>
 
-                    <select
-                      defaultValue={String(currentValue)}
-                      id={`default-${activity}`}
-                      className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                    >
-                      <option value="">No default</option>
-                      {locations.map((location) => (
-                        <option key={location.id} value={location.id}>
-                          {location.name ?? "Unnamed location"}{" "}
-                          ({location.location_type ?? "Location"})
-                        </option>
-                      ))}
-                    </select>
+                      <p className="mt-1 text-sm text-slate-300">
+                        Current default:{" "}
+                        <span className="font-semibold text-white">
+                          {getLocationLabel(selectedLocationId)}
+                        </span>
+                      </p>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const selectElement = document.getElementById(
-                          `default-${activity}`
-                        ) as HTMLSelectElement | null;
+                      <div
+                        className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                          hasDefault
+                            ? "bg-green-600 text-white"
+                            : "bg-slate-700 text-slate-300"
+                        }`}
+                      >
+                        {hasDefault ? "Configured" : "No default"}
+                      </div>
+                    </div>
 
-                        saveDefault(activity, selectElement?.value ?? "");
-                      }}
-                      className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
-                    >
-                      Save
-                    </button>
+                    <div className="grid w-full gap-3 sm:max-w-md">
+                      <label className="grid gap-1">
+                        <span className="text-sm text-slate-300">
+                          Default location
+                        </span>
+
+                        <select
+                          value={selectedLocationId}
+                          onChange={(event) =>
+                            updateSelectedDefault(activity, event.target.value)
+                          }
+                          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                        >
+                          <option value="">No default</option>
+
+                          {locations.map((location) => (
+                            <option key={location.id} value={location.id}>
+                              {location.name ?? "Unnamed location"}{" "}
+                              ({location.location_type ?? "Location"})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => saveDefault(activity)}
+                          disabled={workingActivity === activity}
+                          className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {workingActivity === activity ? "Saving..." : "Save"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => clearDefault(activity)}
+                          disabled={workingActivity === activity}
+                          className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -224,5 +376,20 @@ export default function ActivityDefaultsPage() {
         )}
       </div>
     </main>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="rounded-2xl bg-slate-900 p-5 shadow">
+      <div className="text-3xl font-bold">{value}</div>
+      <div className="mt-1 text-sm text-slate-300">{label}</div>
+    </div>
   );
 }
