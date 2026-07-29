@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
+import { ACTIVITY_OPTIONS, PLAN_STATUS_OPTIONS } from "@/lib/activityMeta";
 
 type PlannedActivity = {
   id: number;
@@ -25,23 +26,6 @@ type ActivityLog = {
   id: number;
   planned_activity_id: number | null;
 };
-
-const ACTIVITY_OPTIONS = [
-  "Fishing",
-  "Camping",
-  "Running",
-  "Kayaking",
-  "Disc Golf",
-  "Tennis",
-  "Beach Day",
-];
-
-const PLAN_STATUS_OPTIONS = [
-  "Planned",
-  "Maybe",
-  "Completed",
-  "Canceled",
-];
 
 const DID_GO_OPTIONS = [
   "Yes",
@@ -69,16 +53,23 @@ export default function PlansPage() {
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
 
+  const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
+  const [editActivity, setEditActivity] = useState("Running");
+  const [editPlannedDate, setEditPlannedDate] = useState("");
+  const [editPlannedWindow, setEditPlannedWindow] = useState("");
+  const [editStatus, setEditStatus] = useState("Planned");
+  const [editLocationName, setEditLocationName] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+
   const [updatingId, setUpdatingId] = useState<number | null>(null);
-  const [deleteError, setDeleteError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [actionError, setActionError] = useState("");
 
   const [logPlanId, setLogPlanId] = useState<number | null>(null);
   const [logEnjoyment, setLogEnjoyment] = useState(7);
   const [logDidIGo, setLogDidIGo] = useState("Yes");
   const [logActualTime, setLogActualTime] = useState("");
   const [logNotes, setLogNotes] = useState("");
-  const [logMessage, setLogMessage] = useState("");
-  const [logError, setLogError] = useState("");
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -155,7 +146,6 @@ export default function PlansPage() {
     });
 
     setLoggedPlanIds(linkedIds);
-
     setLoading(false);
   }
 
@@ -191,7 +181,6 @@ export default function PlansPage() {
     }
 
     setSaveMessage("Planned activity saved.");
-
     setActivity("Running");
     setPlannedWindow("");
     setStatus("Planned");
@@ -199,8 +188,65 @@ export default function PlansPage() {
     setNotes("");
 
     await loadPlansAndLinkedLogs();
-
     setSaving(false);
+  }
+
+  function startEditing(plan: PlannedActivity) {
+    setEditingPlanId(plan.id);
+    setEditActivity(plan.activity ?? "Running");
+    setEditPlannedDate(plan.planned_date ?? "");
+    setEditPlannedWindow(plan.planned_window ?? "");
+    setEditStatus(plan.status ?? "Planned");
+    setEditLocationName(plan.location_name ?? "");
+    setEditNotes(plan.notes ?? "");
+    setActionMessage("");
+    setActionError("");
+  }
+
+  function cancelEditing() {
+    setEditingPlanId(null);
+    setEditActivity("Running");
+    setEditPlannedDate("");
+    setEditPlannedWindow("");
+    setEditStatus("Planned");
+    setEditLocationName("");
+    setEditNotes("");
+  }
+
+  async function savePlanEdits(planId: number) {
+    if (!user) {
+      return;
+    }
+
+    setUpdatingId(planId);
+    setActionMessage("");
+    setActionError("");
+
+    const { error } = await supabase
+      .from("planned_activities")
+      .update({
+        activity: editActivity,
+        planned_date: editPlannedDate,
+        planned_window: editPlannedWindow,
+        status: editStatus,
+        location_name: editLocationName,
+        notes: editNotes,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", planId)
+      .eq("user_id", user.id);
+
+    if (error) {
+      setActionError(error.message);
+      setUpdatingId(null);
+      return;
+    }
+
+    setActionMessage("Plan updated.");
+    setEditingPlanId(null);
+
+    await loadPlansAndLinkedLogs();
+    setUpdatingId(null);
   }
 
   async function updatePlanStatus(planId: number, newStatus: string) {
@@ -209,7 +255,7 @@ export default function PlansPage() {
     }
 
     setUpdatingId(planId);
-    setDeleteError("");
+    setActionError("");
 
     const { error } = await supabase
       .from("planned_activities")
@@ -221,13 +267,12 @@ export default function PlansPage() {
       .eq("user_id", user.id);
 
     if (error) {
-      setDeleteError(error.message);
+      setActionError(error.message);
       setUpdatingId(null);
       return;
     }
 
     await loadPlansAndLinkedLogs();
-
     setUpdatingId(null);
   }
 
@@ -245,7 +290,7 @@ export default function PlansPage() {
     }
 
     setUpdatingId(planId);
-    setDeleteError("");
+    setActionError("");
 
     const { error } = await supabase
       .from("planned_activities")
@@ -254,13 +299,12 @@ export default function PlansPage() {
       .eq("user_id", user.id);
 
     if (error) {
-      setDeleteError(error.message);
+      setActionError(error.message);
       setUpdatingId(null);
       return;
     }
 
     await loadPlansAndLinkedLogs();
-
     setUpdatingId(null);
   }
 
@@ -270,8 +314,8 @@ export default function PlansPage() {
     setLogDidIGo("Yes");
     setLogActualTime("");
     setLogNotes("");
-    setLogMessage("");
-    setLogError("");
+    setActionMessage("");
+    setActionError("");
   }
 
   function cancelLogPlan() {
@@ -280,8 +324,6 @@ export default function PlansPage() {
     setLogDidIGo("Yes");
     setLogActualTime("");
     setLogNotes("");
-    setLogMessage("");
-    setLogError("");
   }
 
   async function saveLogFromPlan(plan: PlannedActivity) {
@@ -290,13 +332,13 @@ export default function PlansPage() {
     }
 
     if (loggedPlanIds.has(plan.id)) {
-      setLogError("This planned activity has already been logged.");
+      setActionError("This planned activity has already been logged.");
       return;
     }
 
     setUpdatingId(plan.id);
-    setLogMessage("");
-    setLogError("");
+    setActionMessage("");
+    setActionError("");
 
     const actualScore = logEnjoyment * 10;
 
@@ -328,7 +370,7 @@ export default function PlansPage() {
       });
 
     if (logErrorResponse) {
-      setLogError(logErrorResponse.message);
+      setActionError(logErrorResponse.message);
       setUpdatingId(null);
       return;
     }
@@ -343,16 +385,15 @@ export default function PlansPage() {
       .eq("user_id", user.id);
 
     if (planUpdateError) {
-      setLogError(planUpdateError.message);
+      setActionError(planUpdateError.message);
       setUpdatingId(null);
       return;
     }
 
-    setLogMessage("Activity log created and plan marked Completed.");
+    setActionMessage("Activity log created and plan marked Completed.");
     setLogPlanId(null);
 
     await loadPlansAndLinkedLogs();
-
     setUpdatingId(null);
   }
 
@@ -371,9 +412,7 @@ export default function PlansPage() {
       <main className="min-h-screen bg-slate-950 p-6 text-white">
         <div className="mx-auto max-w-4xl">
           <NavBar />
-
           <h1 className="text-3xl font-bold">Plans</h1>
-
           <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
             Please log in on the Home page to view and create plans.
           </p>
@@ -508,21 +547,15 @@ export default function PlansPage() {
             </div>
           )}
 
-          {deleteError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {deleteError}
-            </div>
-          )}
-
-          {logMessage && (
+          {actionMessage && (
             <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {logMessage}
+              {actionMessage}
             </div>
           )}
 
-          {logError && (
+          {actionError && (
             <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {logError}
+              {actionError}
             </div>
           )}
 
@@ -539,167 +572,144 @@ export default function PlansPage() {
                   key={plan.id}
                   className="rounded-xl border border-slate-700 bg-slate-800 p-4"
                 >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
+                  {editingPlanId === plan.id ? (
+                    <div className="grid gap-4">
                       <div className="text-lg font-semibold">
-                        {plan.activity ?? "Unknown activity"}
+                        Editing plan
                       </div>
 
-                      <div className="mt-1 text-sm text-slate-300">
-                        {plan.planned_date ?? "Unknown date"} ·{" "}
-                        {plan.planned_window || "No window"} ·{" "}
-                        {plan.status ?? "Unknown status"}
+                      <PlanFormFields
+                        activity={editActivity}
+                        setActivity={setEditActivity}
+                        plannedDate={editPlannedDate}
+                        setPlannedDate={setEditPlannedDate}
+                        plannedWindow={editPlannedWindow}
+                        setPlannedWindow={setEditPlannedWindow}
+                        status={editStatus}
+                        setStatus={setEditStatus}
+                        locationName={editLocationName}
+                        setLocationName={setEditLocationName}
+                        notes={editNotes}
+                        setNotes={setEditNotes}
+                      />
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => savePlanEdits(plan.id)}
+                          disabled={updatingId === plan.id}
+                          className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {updatingId === plan.id ? "Saving..." : "Save edits"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={cancelEditing}
+                          className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                        >
+                          Cancel
+                        </button>
                       </div>
-
-                      {alreadyLogged && (
-                        <div className="mt-2 inline-flex rounded-full bg-green-600 px-3 py-1 text-xs font-bold text-white">
-                          Already logged
-                        </div>
-                      )}
-
-                      {plan.location_name && (
-                        <div className="mt-2 text-sm text-slate-400">
-                          Location: {plan.location_name}
-                        </div>
-                      )}
-
-                      {plan.species_target_at_planning && (
-                        <div className="mt-1 text-sm text-slate-400">
-                          Fishing target: {plan.species_target_at_planning}
-                        </div>
-                      )}
-
-                      {plan.notes && (
-                        <p className="mt-2 text-sm text-slate-300">
-                          {plan.notes}
-                        </p>
-                      )}
                     </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-lg font-semibold">
+                            {plan.activity ?? "Unknown activity"}
+                          </div>
 
-                    <div className="grid gap-2">
-                      <select
-                        value={plan.status ?? "Planned"}
-                        onChange={(event) =>
-                          updatePlanStatus(plan.id, event.target.value)
-                        }
-                        disabled={updatingId === plan.id}
-                        className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-400"
-                      >
-                        {PLAN_STATUS_OPTIONS.map((option) => (
-                          <option key={option}>{option}</option>
-                        ))}
-                      </select>
+                          <div className="mt-1 text-sm text-slate-300">
+                            {plan.planned_date ?? "Unknown date"} ·{" "}
+                            {plan.planned_window || "No window"} ·{" "}
+                            {plan.status ?? "Unknown status"}
+                          </div>
 
-                      <button
-                        type="button"
-                        onClick={() => startLogPlan(plan.id)}
-                        disabled={alreadyLogged}
-                        className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {alreadyLogged ? "Logged" : "Log this plan"}
-                      </button>
+                          {alreadyLogged && (
+                            <div className="mt-2 inline-flex rounded-full bg-green-600 px-3 py-1 text-xs font-bold text-white">
+                              Already logged
+                            </div>
+                          )}
 
-                      <button
-                        type="button"
-                        onClick={() => deletePlan(plan.id)}
-                        disabled={updatingId === plan.id}
-                        className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {updatingId === plan.id ? "Working..." : "Delete"}
-                      </button>
-                    </div>
-                  </div>
+                          {plan.location_name && (
+                            <div className="mt-2 text-sm text-slate-400">
+                              Location: {plan.location_name}
+                            </div>
+                          )}
 
-                  {logPlanId === plan.id && (
-                    <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900 p-4">
-                      <h3 className="text-lg font-semibold">
-                        Log this planned activity
-                      </h3>
+                          {plan.species_target_at_planning && (
+                            <div className="mt-1 text-sm text-slate-400">
+                              Fishing target: {plan.species_target_at_planning}
+                            </div>
+                          )}
 
-                      <div className="mt-4 grid gap-4">
-                        <label className="grid gap-2">
-                          <span className="text-sm text-slate-300">
-                            Actual enjoyment: {logEnjoyment}/10
-                          </span>
-                          <input
-                            type="range"
-                            min={1}
-                            max={10}
-                            value={logEnjoyment}
-                            onChange={(event) =>
-                              setLogEnjoyment(Number(event.target.value))
-                            }
-                          />
-                        </label>
+                          {plan.notes && (
+                            <p className="mt-2 text-sm text-slate-300">
+                              {plan.notes}
+                            </p>
+                          )}
+                        </div>
 
-                        <label className="grid gap-1">
-                          <span className="text-sm text-slate-300">
-                            Did you go?
-                          </span>
+                        <div className="grid gap-2">
                           <select
-                            value={logDidIGo}
+                            value={plan.status ?? "Planned"}
                             onChange={(event) =>
-                              setLogDidIGo(event.target.value)
+                              updatePlanStatus(plan.id, event.target.value)
                             }
-                            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                            disabled={updatingId === plan.id}
+                            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-400"
                           >
-                            {DID_GO_OPTIONS.map((option) => (
+                            {PLAN_STATUS_OPTIONS.map((option) => (
                               <option key={option}>{option}</option>
                             ))}
                           </select>
-                        </label>
 
-                        <label className="grid gap-1">
-                          <span className="text-sm text-slate-300">
-                            Actual time
-                          </span>
-                          <input
-                            type="text"
-                            value={logActualTime}
-                            onChange={(event) =>
-                              setLogActualTime(event.target.value)
-                            }
-                            placeholder="Example: 7:30 AM or 6:00 PM"
-                            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                          />
-                        </label>
-
-                        <label className="grid gap-1">
-                          <span className="text-sm text-slate-300">
-                            Notes
-                          </span>
-                          <textarea
-                            value={logNotes}
-                            onChange={(event) =>
-                              setLogNotes(event.target.value)
-                            }
-                            placeholder="How did it go?"
-                            className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                          />
-                        </label>
-
-                        <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() => saveLogFromPlan(plan)}
-                            disabled={updatingId === plan.id}
-                            className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                            onClick={() => startEditing(plan)}
+                            className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
                           >
-                            {updatingId === plan.id
-                              ? "Saving..."
-                              : "Save activity log"}
+                            Edit
                           </button>
 
                           <button
                             type="button"
-                            onClick={cancelLogPlan}
-                            className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                            onClick={() => startLogPlan(plan.id)}
+                            disabled={alreadyLogged}
+                            className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            Cancel
+                            {alreadyLogged ? "Logged" : "Log this plan"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => deletePlan(plan.id)}
+                            disabled={updatingId === plan.id}
+                            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {updatingId === plan.id ? "Working..." : "Delete"}
                           </button>
                         </div>
                       </div>
-                    </div>
+
+                      {logPlanId === plan.id && (
+                        <LogPlanForm
+                          planId={plan.id}
+                          logEnjoyment={logEnjoyment}
+                          setLogEnjoyment={setLogEnjoyment}
+                          logDidIGo={logDidIGo}
+                          setLogDidIGo={setLogDidIGo}
+                          logActualTime={logActualTime}
+                          setLogActualTime={setLogActualTime}
+                          logNotes={logNotes}
+                          setLogNotes={setLogNotes}
+                          updatingId={updatingId}
+                          onSave={() => saveLogFromPlan(plan)}
+                          onCancel={cancelLogPlan}
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               );
@@ -708,5 +718,211 @@ export default function PlansPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function PlanFormFields({
+  activity,
+  setActivity,
+  plannedDate,
+  setPlannedDate,
+  plannedWindow,
+  setPlannedWindow,
+  status,
+  setStatus,
+  locationName,
+  setLocationName,
+  notes,
+  setNotes,
+}: {
+  activity: string;
+  setActivity: (value: string) => void;
+  plannedDate: string;
+  setPlannedDate: (value: string) => void;
+  plannedWindow: string;
+  setPlannedWindow: (value: string) => void;
+  status: string;
+  setStatus: (value: string) => void;
+  locationName: string;
+  setLocationName: (value: string) => void;
+  notes: string;
+  setNotes: (value: string) => void;
+}) {
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="grid gap-1">
+          <span className="text-sm text-slate-300">Activity</span>
+          <select
+            value={activity}
+            onChange={(event) => setActivity(event.target.value)}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+          >
+            {ACTIVITY_OPTIONS.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="grid gap-1">
+          <span className="text-sm text-slate-300">Date</span>
+          <input
+            type="date"
+            value={plannedDate}
+            onChange={(event) => setPlannedDate(event.target.value)}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="grid gap-1">
+          <span className="text-sm text-slate-300">Planned window</span>
+          <input
+            type="text"
+            value={plannedWindow}
+            onChange={(event) => setPlannedWindow(event.target.value)}
+            placeholder="Example: 6:00 PM–8:00 PM"
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+          />
+        </label>
+
+        <label className="grid gap-1">
+          <span className="text-sm text-slate-300">Status</span>
+          <select
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+          >
+            {PLAN_STATUS_OPTIONS.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <label className="grid gap-1">
+        <span className="text-sm text-slate-300">Location name</span>
+        <input
+          type="text"
+          value={locationName}
+          onChange={(event) => setLocationName(event.target.value)}
+          placeholder="Example: Local Pond, Tennis Courts"
+          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+        />
+      </label>
+
+      <label className="grid gap-1">
+        <span className="text-sm text-slate-300">Notes</span>
+        <textarea
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          placeholder="Optional notes"
+          className="min-h-24 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+        />
+      </label>
+    </div>
+  );
+}
+
+function LogPlanForm({
+  planId,
+  logEnjoyment,
+  setLogEnjoyment,
+  logDidIGo,
+  setLogDidIGo,
+  logActualTime,
+  setLogActualTime,
+  logNotes,
+  setLogNotes,
+  updatingId,
+  onSave,
+  onCancel,
+}: {
+  planId: number;
+  logEnjoyment: number;
+  setLogEnjoyment: (value: number) => void;
+  logDidIGo: string;
+  setLogDidIGo: (value: string) => void;
+  logActualTime: string;
+  setLogActualTime: (value: string) => void;
+  logNotes: string;
+  setLogNotes: (value: string) => void;
+  updatingId: number | null;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900 p-4">
+      <h3 className="text-lg font-semibold">Log this planned activity</h3>
+
+      <div className="mt-4 grid gap-4">
+        <label className="grid gap-2">
+          <span className="text-sm text-slate-300">
+            Actual enjoyment: {logEnjoyment}/10
+          </span>
+          <input
+            type="range"
+            min={1}
+            max={10}
+            value={logEnjoyment}
+            onChange={(event) => setLogEnjoyment(Number(event.target.value))}
+          />
+        </label>
+
+        <label className="grid gap-1">
+          <span className="text-sm text-slate-300">Did you go?</span>
+          <select
+            value={logDidIGo}
+            onChange={(event) => setLogDidIGo(event.target.value)}
+            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+          >
+            {DID_GO_OPTIONS.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="grid gap-1">
+          <span className="text-sm text-slate-300">Actual time</span>
+          <input
+            type="text"
+            value={logActualTime}
+            onChange={(event) => setLogActualTime(event.target.value)}
+            placeholder="Example: 7:30 AM or 6:00 PM"
+            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+          />
+        </label>
+
+        <label className="grid gap-1">
+          <span className="text-sm text-slate-300">Notes</span>
+          <textarea
+            value={logNotes}
+            onChange={(event) => setLogNotes(event.target.value)}
+            placeholder="How did it go?"
+            className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+          />
+        </label>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={updatingId === planId}
+            className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {updatingId === planId ? "Saving..." : "Save activity log"}
+          </button>
+
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

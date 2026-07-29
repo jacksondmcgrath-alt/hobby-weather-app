@@ -23,6 +23,13 @@ type SavedLocation = {
   notes: string | null;
 };
 
+type LocationCandidate = {
+  label: string;
+  latitude: number;
+  longitude: number;
+  source: string;
+};
+
 const LOCATION_TYPE_OPTIONS = [
   "Home",
   "Lake",
@@ -117,6 +124,12 @@ export default function LocationsPage() {
   const [editError, setEditError] = useState("");
   const [deleteError, setDeleteError] = useState("");
 
+  const [locationSearch, setLocationSearch] = useState("");
+  const [locationCandidates, setLocationCandidates] = useState<LocationCandidate[]>([]);
+  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
+  const [searchingLocation, setSearchingLocation] = useState(false);
+  const [locationSearchError, setLocationSearchError] = useState("");
+
   useEffect(() => {
     if (!user) {
       setLocations([]);
@@ -167,6 +180,53 @@ export default function LocationsPage() {
 
     setLocations(data ?? []);
     setLoading(false);
+  }
+
+  async function searchForLocation() {
+    setSearchingLocation(true);
+    setLocationSearchError("");
+    setLocationCandidates([]);
+    setSelectedCandidateIndex(0);
+
+    if (locationSearch.trim() === "") {
+      setLocationSearchError("Enter a place, address, map link, or coordinates.");
+      setSearchingLocation(false);
+      return;
+    }
+
+    const response = await fetch(
+      `/api/geocode?q=${encodeURIComponent(locationSearch)}`
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      setLocationSearchError(result.error ?? "Could not search for location.");
+      setSearchingLocation(false);
+      return;
+    }
+
+    const results = result.results ?? [];
+
+    setLocationCandidates(results);
+
+    if (results.length === 0) {
+      setLocationSearchError("No matching locations found.");
+    }
+
+    setSearchingLocation(false);
+  }
+
+  function useSelectedCandidate() {
+    const selected = locationCandidates[selectedCandidateIndex];
+
+    if (!selected) {
+      return;
+    }
+
+    setName(selected.label.split(",")[0] ?? selected.label);
+    setLatitude(String(selected.latitude));
+    setLongitude(String(selected.longitude));
   }
 
   function parseOptionalNumber(value: string) {
@@ -442,6 +502,74 @@ export default function LocationsPage() {
 
         <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="text-xl font-semibold">Add Location</h2>
+
+        <div className="mt-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
+          <h3 className="font-semibold">Search for a location</h3>
+
+          <p className="mt-1 text-sm text-slate-400">
+            Search by place name, address, coordinates, or a map link with coordinates.
+          </p>
+
+          <div className="mt-3 grid gap-3">
+            <input
+              type="text"
+              value={locationSearch}
+              onChange={(event) => setLocationSearch(event.target.value)}
+              placeholder="Example: Gallup Park Ann Arbor, address, or 42.2808,-83.7430"
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+            />
+
+            <button
+              type="button"
+              onClick={searchForLocation}
+              disabled={searchingLocation}
+              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {searchingLocation ? "Searching..." : "Find location"}
+            </button>
+
+            {locationSearchError && (
+              <div className="rounded-lg bg-red-900/50 p-3 text-red-200">
+                {locationSearchError}
+              </div>
+            )}
+
+            {locationCandidates.length > 0 && (
+              <div className="grid gap-3">
+                <label className="grid gap-1">
+                  <span className="text-sm text-slate-300">
+                    Choose result
+                  </span>
+
+                  <select
+                    value={selectedCandidateIndex}
+                    onChange={(event) =>
+                      setSelectedCandidateIndex(Number(event.target.value))
+                    }
+                    className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+                  >
+                    {locationCandidates.map((candidate, index) => (
+                      <option
+                        key={`${candidate.latitude}-${candidate.longitude}-${index}`}
+                        value={index}
+                      >
+                        {candidate.label} ({candidate.source})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={useSelectedCandidate}
+                  className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
+                >
+                  Use selected location
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
           <form onSubmit={handleSaveLocation} className="mt-4 grid gap-4">
             <label className="grid gap-1">

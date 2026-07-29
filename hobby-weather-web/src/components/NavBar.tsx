@@ -13,6 +13,7 @@ export function NavBar() {
       <NavLink href="/scenarios" label="Scenarios" />
       <NavLink href="/preferences" label="Preferences" />
       <NavLink href="/exports" label="Exports" />
+      <NavLink href="/profile" label="Profile" />
     </nav>
   );
 }
