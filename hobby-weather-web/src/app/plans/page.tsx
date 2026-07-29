@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
 import { ACTIVITY_OPTIONS, PLAN_STATUS_OPTIONS } from "@/lib/activityMeta";
+import { trackEvent } from "@/lib/trackEvent";
 
 type PlannedActivity = {
   id: number;
@@ -162,6 +163,26 @@ export default function PlansPage() {
       return;
     }
 
+    const { data: existingPlans, error: existingPlanError } = await supabase
+      .from("planned_activities")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("activity", activity)
+      .eq("planned_date", plannedDate)
+      .limit(1);
+
+    if (existingPlanError) {
+      setSaveError(existingPlanError.message);
+      setSaving(false);
+      return;
+    }
+
+    if ((existingPlans ?? []).length > 0) {
+      setSaveError("You already have this activity planned for that date.");
+      setSaving(false);
+      return;
+    }
+
     const { error } = await supabase
       .from("planned_activities")
       .insert({
@@ -179,6 +200,13 @@ export default function PlansPage() {
       setSaving(false);
       return;
     }
+
+    await trackEvent(user.id, "plan_created", {
+      activity,
+      planned_date: plannedDate,
+      planned_window: plannedWindow,
+      status,
+    });
 
     setSaveMessage("Planned activity saved.");
     setActivity("Running");
@@ -389,6 +417,13 @@ export default function PlansPage() {
       setUpdatingId(null);
       return;
     }
+
+    await trackEvent(user.id, "planned_activity_logged", {
+      plan_id: plan.id,
+      activity: plan.activity,
+      planned_date: plan.planned_date,
+      actual_enjoyment: logEnjoyment,
+    });
 
     setActionMessage("Activity log created and plan marked Completed.");
     setLogPlanId(null);

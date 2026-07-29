@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
+import { trackEvent } from "@/lib/trackEvent";
 
 type PreferenceSettings = {
   bug_tolerance: number;
@@ -131,6 +132,10 @@ export default function PreferencesPage() {
       setSaving(false);
       return;
     }
+
+    await trackEvent(user.id, "preferences_saved", {
+      preferences,
+    });
 
     setSaveMessage("Preferences saved.");
     setSaving(false);

@@ -69,59 +69,111 @@ export default function PlannerPage() {
     setLoading(true);
     setErrorMessage("");
 
-    const { data: predictionData, error: predictionError } = await supabase
-      .from("prediction_history")
-      .select(
-        [
-          "date",
-          "activity",
-          "predicted_score",
-          "label",
-          "explanation",
-          "gear_notes",
-          "avg_temp",
-          "wind_max",
-          "gust_max",
-          "rain_chance",
-          "bug_index",
-          "water_temp_est",
-          "best_species",
-          "best_species_score",
-        ].join(",")
-      )
-      .order("date", { ascending: true });
+    let loadedPredictions: PredictionRow[] = [];
 
-    if (predictionError) {
-      setErrorMessage(predictionError.message);
-      setLoading(false);
-      return;
+    // --------------------------------------------------
+    // 1. Try user-specific predictions first
+    // --------------------------------------------------
+
+    const { data: userPredictionData, error: userPredictionError } = await supabase
+        .from("user_predictions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: true });
+
+    if (userPredictionError) {
+        setErrorMessage(userPredictionError.message);
+        setLoading(false);
+        return;
     }
 
-    setPredictions(predictionData ?? []);
+    if ((userPredictionData ?? []).length > 0) {
+        loadedPredictions = (userPredictionData ?? []).map((item: any) => ({
+        date: item.date,
+        activity: item.activity,
+        predicted_score: item.predicted_score,
+        label: item.label,
+        explanation: item.explanation,
+        gear_notes: item.gear_notes,
+        avg_temp: item.weather_snapshot?.avg_temp ?? null,
+        wind_max: item.weather_snapshot?.wind_max ?? null,
+        gust_max: item.weather_snapshot?.gust_max ?? null,
+        rain_chance: item.weather_snapshot?.rain_chance ?? null,
+        bug_index: item.weather_snapshot?.bug_index ?? null,
+        water_temp_est: item.weather_snapshot?.water_temp_est ?? null,
+        best_species: item.best_species,
+        best_species_score: item.best_species_score,
+        }));
+    } else {
+        // --------------------------------------------------
+        // 2. Fall back to global prediction_history
+        // --------------------------------------------------
+
+        const { data: fallbackPredictionData, error: fallbackPredictionError } =
+        await supabase
+            .from("prediction_history")
+            .select(
+            [
+                "date",
+                "activity",
+                "predicted_score",
+                "label",
+                "explanation",
+                "gear_notes",
+                "avg_temp",
+                "wind_max",
+                "gust_max",
+                "rain_chance",
+                "bug_index",
+                "water_temp_est",
+                "best_species",
+                "best_species_score",
+            ].join(",")
+            )
+            .order("date", { ascending: true });
+
+        if (fallbackPredictionError) {
+        setErrorMessage(fallbackPredictionError.message);
+        setLoading(false);
+        return;
+        }
+
+        loadedPredictions = fallbackPredictionData ?? [];
+    }
+
+    setPredictions(loadedPredictions);
 
     const dates = Array.from(
-      new Set((predictionData ?? []).map((item) => item.date).filter(Boolean))
+        new Set(
+        loadedPredictions
+            .map((item) => item.date)
+            .filter(Boolean)
+        )
     ) as string[];
 
     if (dates.length > 0 && selectedDate === "") {
-      setSelectedDate(dates[0]);
+        setSelectedDate(dates[0]);
     }
 
+    // --------------------------------------------------
+    // 3. Load this user's planned activities
+    // --------------------------------------------------
+
     const { data: plansData, error: plansError } = await supabase
-      .from("planned_activities")
-      .select("id,activity,planned_date,planned_window")
-      .eq("user_id", user.id);
+        .from("planned_activities")
+        .select("id,activity,planned_date,planned_window")
+        .eq("user_id", user.id);
 
     if (plansError) {
-      setErrorMessage(plansError.message);
-      setLoading(false);
-      return;
+        setErrorMessage(plansError.message);
+        setLoading(false);
+        return;
     }
 
     setPlans(plansData ?? []);
 
     setLoading(false);
-  }
+    }
 
   const availableDates = useMemo(() => {
     return Array.from(

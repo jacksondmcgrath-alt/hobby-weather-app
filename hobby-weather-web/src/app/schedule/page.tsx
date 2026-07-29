@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
+import { trackEvent } from "@/lib/trackEvent";
 
 type WeeklyObligation = {
   id: number;
@@ -138,6 +139,14 @@ export default function SchedulePage() {
     setLabel("");
     setStartTime("08:00");
     setEndTime("17:00");
+
+    await trackEvent(user.id, "weekly_obligation_created", {
+      label,
+      day_of_week: dayOfWeek,
+      start_time: startTime,
+      end_time: endTime,
+    });
+
     setMessage("Schedule block saved.");
 
     await loadObligations();
@@ -170,6 +179,12 @@ export default function SchedulePage() {
       setSaving(false);
       return;
     }
+
+    await trackEvent(user.id, "workweek_preset_added", {
+      label: "Work",
+      start_time: "08:00",
+      end_time: "17:00",
+    });
 
     setMessage("Workweek preset added.");
     await loadObligations();
@@ -221,8 +236,21 @@ export default function SchedulePage() {
       return;
     }
 
+    await trackEvent(user.id, "weekly_obligation_updated", {
+      obligation_id: obligationId,
+      label: editLabel,
+      day_of_week: editDayOfWeek,
+      start_time: editStartTime,
+      end_time: editEndTime,
+      active: editActive,
+    });
+
     setMessage("Schedule block updated.");
     setEditingId(null);
+
+    await trackEvent(user.id, "weekly_obligation_deleted", {
+      obligation_id: id,
+    });
 
     await loadObligations();
     setWorkingId(null);

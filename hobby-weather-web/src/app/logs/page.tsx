@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
+import { trackEvent } from "@/lib/trackEvent";
 
 type ActivityLog = {
   id: number;
@@ -156,6 +157,14 @@ export default function LogsPage() {
     }
 
     setSaveMessage("Activity log saved.");
+
+    await trackEvent(user.id, "activity_log_created", {
+      activity,
+      date,
+      actual_enjoyment: actualEnjoyment,
+      did_i_go: didIGo,
+    });
+
     setNotes("");
     setActualEnjoyment(7);
     setDidIGo("Yes");
@@ -220,6 +229,12 @@ export default function LogsPage() {
       setWorkingLogId(null);
       return;
     }
+
+    await trackEvent(user.id, "activity_log_updated", {
+      log_id: log.id,
+      activity: log.activity,
+      actual_enjoyment: editEnjoyment,
+    });
 
     setEditMessage("Log updated.");
     setEditingLogId(null);

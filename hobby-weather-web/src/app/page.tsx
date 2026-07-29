@@ -12,6 +12,8 @@ type DashboardCounts = {
   activityLogs: number;
   plannedActivities: number;
   scenarioRatings: number;
+  activityDefaults: number;
+  weeklyObligations: number;
 };
 
 type PlannedActivity = {
@@ -54,6 +56,8 @@ export default function Home() {
     activityLogs: 0,
     plannedActivities: 0,
     scenarioRatings: 0,
+    activityDefaults: 0,
+weeklyObligations: 0,
   });
 
   const [upcomingPlans, setUpcomingPlans] = useState<PlannedActivity[]>([]);
@@ -106,10 +110,12 @@ export default function Home() {
     await supabase.auth.signOut();
 
     setCounts({
-      savedLocations: 0,
-      activityLogs: 0,
-      plannedActivities: 0,
-      scenarioRatings: 0,
+      savedLocations: savedLocationsCount,
+      activityLogs: activityLogsCount,
+      plannedActivities: plannedActivitiesCount,
+      scenarioRatings: scenarioRatingsCount,
+      activityDefaults: activityDefaultsCount,
+      weeklyObligations: weeklyObligationsCount,
     });
 
     setUpcomingPlans([]);
@@ -142,11 +148,15 @@ export default function Home() {
         activityLogsCount,
         plannedActivitiesCount,
         scenarioRatingsCount,
+        activityDefaultsCount,
+        weeklyObligationsCount,
       ] = await Promise.all([
         getCount("saved_locations", currentUser.id),
         getCount("activity_logs", currentUser.id),
         getCount("planned_activities", currentUser.id),
         getCount("scenario_ratings", currentUser.id),
+        getCount("activity_location_defaults", currentUser.id),
+        getCount("weekly_obligations", currentUser.id),
       ]);
 
       setCounts({
@@ -154,6 +164,8 @@ export default function Home() {
         activityLogs: activityLogsCount,
         plannedActivities: plannedActivitiesCount,
         scenarioRatings: scenarioRatingsCount,
+        activityDefaults: activityDefaultsCount,
+        weeklyObligations: weeklyObligationsCount,
       });
 
       const today = new Date().toISOString().slice(0, 10);
@@ -395,6 +407,18 @@ export default function Home() {
               complete={counts.scenarioRatings >= 5}
               label="Rate at least 5 scenarios"
               href="/scenarios"
+            />
+
+            <ChecklistItem
+              complete={counts.activityDefaults > 0}
+              label="Set at least one activity default location"
+              href="/activity-defaults"
+            />
+
+            <ChecklistItem
+              complete={counts.weeklyObligations > 0}
+              label="Add your weekly schedule"
+              href="/schedule"
             />
           </div>
         </section>

@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
 import { ACTIVITY_OPTIONS, activityLabel } from "@/lib/activityMeta";
+import { trackEvent } from "@/lib/trackEvent";
 
 type SavedLocation = {
   id: number;
@@ -152,6 +153,10 @@ export default function ActivityDefaultsPage() {
         return;
       }
 
+      await trackEvent(user.id, "activity_default_removed", {
+        activity,
+      });
+
       setMessage(`Removed default location for ${activity}.`);
       await loadData();
       setWorkingActivity(null);
@@ -176,6 +181,11 @@ export default function ActivityDefaultsPage() {
       setWorkingActivity(null);
       return;
     }
+
+    await trackEvent(user.id, "activity_default_saved", {
+      activity,
+      saved_location_id: savedLocationId,
+    });
 
     setMessage(`Saved default location for ${activity}.`);
     await loadData();
@@ -202,6 +212,11 @@ export default function ActivityDefaultsPage() {
     }
 
     updateSelectedDefault(activity, "");
+
+    await trackEvent(user.id, "activity_default_removed", {
+      activity,
+    });
+
     setMessage(`Cleared default location for ${activity}.`);
 
     await loadData();

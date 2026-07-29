@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
+import { trackEvent } from "@/lib/trackEvent";
 
 type SavedLocation = {
   id: number;
@@ -296,6 +297,14 @@ export default function LocationsPage() {
       return;
     }
 
+    await trackEvent(user.id, "location_saved", {
+      name,
+      location_type: locationType,
+      water_type: waterType,
+      water_body_size: waterBodySize,
+      wind_exposure: windExposure,
+    });
+
     setSaveMessage("Location saved.");
 
     setName("");
@@ -420,8 +429,19 @@ export default function LocationsPage() {
       return;
     }
 
+    await trackEvent(user.id, "location_updated", {
+      location_id: locationId,
+      name: editName,
+      location_type: editLocationType,
+      water_type: editWaterType,
+    });
+
     setEditMessage("Location updated.");
     setEditingId(null);
+
+    await trackEvent(user.id, "location_deleted", {
+      location_id: locationId,
+    });
 
     await loadLocations();
 

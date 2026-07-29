@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
+import { trackEvent } from "@/lib/trackEvent";
 
 type ScenarioRating = {
   id: number;
@@ -466,6 +467,13 @@ export default function ScenariosPage() {
       return;
     }
 
+    await trackEvent(user.id, "scenario_rating_created", {
+      activity,
+      rating,
+      confidence,
+      source: "nextjs_random_scenario_v1",
+    });
+
     setSaveMessage("Scenario rating saved.");
     setScenario(generateScenario(activity));
     setRating(5);
@@ -525,8 +533,18 @@ export default function ScenariosPage() {
       return;
     }
 
+    await trackEvent(user.id, "scenario_rating_updated", {
+      scenario_rating_id: item.id,
+      rating: editRating,
+      confidence: editConfidence,
+    });
+
     setEditMessage("Scenario rating updated.");
     setEditingId(null);
+
+    await trackEvent(user.id, "scenario_rating_deleted", {
+      scenario_rating_id: itemId,
+    });
 
     await loadRatings();
 
