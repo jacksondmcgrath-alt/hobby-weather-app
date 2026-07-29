@@ -1,154 +1,71 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { useUser } from "@/lib/useUser";
+import { NavBar } from "@/components/NavBar";
 import type { User } from "@supabase/supabase-js";
 
-type SavedLocation = {
-  id: number;
-  user_id: string | null;
-  name: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  location_type: string | null;
-  water_type: string | null;
+type DashboardCounts = {
+  savedLocations: number;
+  activityLogs: number;
+  plannedActivities: number;
+  scenarioRatings: number;
 };
 
+type PlannedActivity = {
+  id: number;
+  activity: string | null;
+  planned_date: string | null;
+  planned_window: string | null;
+  status: string | null;
+  location_name: string | null;
+};
+
+type ActivityLog = {
+  id: number;
+  activity: string | null;
+  date: string | null;
+  actual_enjoyment_1_to_10: number | null;
+  notes: string | null;
+};
+
+const SCENARIO_GOAL_PER_ACTIVITY = 25;
+const SCENARIO_ACTIVITY_COUNT = 7;
+const SCENARIO_TOTAL_GOAL =
+  SCENARIO_GOAL_PER_ACTIVITY * SCENARIO_ACTIVITY_COUNT;
+
 export default function Home() {
-  const [user, setUser] = useState<User | null>(null);
+  const { user, authLoading } = useUser();
 
-  const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
 
-  const [locations, setLocations] = useState<SavedLocation[]>([]);
-  const [locationsLoading, setLocationsLoading] = useState(false);
-  const [locationsError, setLocationsError] = useState("");
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const [dashboardError, setDashboardError] = useState("");
 
-  const [newLocationName, setNewLocationName] = useState("");
-  const [newLocationLatitude, setNewLocationLatitude] = useState("");
-  const [newLocationLongitude, setNewLocationLongitude] = useState("");
-  const [newLocationType, setNewLocationType] = useState("Other");
-  const [newWaterType, setNewWaterType] = useState("Not applicable");
-  const [savingLocation, setSavingLocation] = useState(false);
-  const [saveLocationMessage, setSaveLocationMessage] = useState("");
-  const [saveLocationError, setSaveLocationError] = useState("");
+  const [counts, setCounts] = useState<DashboardCounts>({
+    savedLocations: 0,
+    activityLogs: 0,
+    plannedActivities: 0,
+    scenarioRatings: 0,
+  });
 
-  useEffect(() => {
-    async function loadSession() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-    }
-
-    loadSession();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
+  const [upcomingPlans, setUpcomingPlans] = useState<PlannedActivity[]>([]);
+  const [recentLogs, setRecentLogs] = useState<ActivityLog[]>([]);
 
   useEffect(() => {
     if (!user) {
-      setLocations([]);
       return;
     }
 
-    loadLocations();
+    loadDashboard(user);
   }, [user]);
-
-  async function handleSaveLocation(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    setSavingLocation(true);
-    setSaveLocationMessage("");
-    setSaveLocationError("");
-
-    if (!user) {
-      setSaveLocationError("You must be logged in to save a location.");
-      setSavingLocation(false);
-      return;
-    }
-
-    const latitudeNumber = Number(newLocationLatitude);
-    const longitudeNumber = Number(newLocationLongitude);
-
-    if (Number.isNaN(latitudeNumber) || Number.isNaN(longitudeNumber)) {
-      setSaveLocationError("Latitude and longitude must be valid numbers.");
-      setSavingLocation(false);
-      return;
-    }
-
-    const { error } = await supabase
-      .from("saved_locations")
-      .insert({
-        user_id: user.id,
-        name: newLocationName,
-        latitude: latitudeNumber,
-        longitude: longitudeNumber,
-        location_type: newLocationType,
-        water_type: newWaterType,
-      });
-
-    if (error) {
-      setSaveLocationError(error.message);
-      setSavingLocation(false);
-      return;
-    }
-
-    setSaveLocationMessage("Location saved.");
-
-    setNewLocationName("");
-    setNewLocationLatitude("");
-    setNewLocationLongitude("");
-    setNewLocationType("Other");
-    setNewWaterType("Not applicable");
-
-    await loadLocations();
-
-    setSavingLocation(false);
-  }
-
-  async function loadLocations() {
-    setLocationsLoading(true);
-    setLocationsError("");
-
-    if (!user) {
-      setLocations([]);
-      setLocationsLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("saved_locations")
-      .select("id,user_id,name,latitude,longitude,location_type,water_type")
-      .eq("user_id", user.id)
-      .order("name", { ascending: true })
-      .limit(10);
-
-    if (error) {
-      setLocationsError(error.message);
-      setLocationsLoading(false);
-      return;
-    }
-
-    setLocations(data ?? []);
-    setLocationsLoading(false);
-  }
 
   async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -187,34 +104,122 @@ export default function Home() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    setUser(null);
-    setLocations([]);
+
+    setCounts({
+      savedLocations: 0,
+      activityLogs: 0,
+      plannedActivities: 0,
+      scenarioRatings: 0,
+    });
+
+    setUpcomingPlans([]);
+    setRecentLogs([]);
+  }
+
+  async function getCount(tableName: string, userId: string) {
+    const { count, error } = await supabase
+      .from(tableName)
+      .select("id", {
+        count: "exact",
+        head: true,
+      })
+      .eq("user_id", userId);
+
+    if (error) {
+      throw error;
+    }
+
+    return count ?? 0;
+  }
+
+  async function loadDashboard(currentUser: User) {
+    setLoadingDashboard(true);
+    setDashboardError("");
+
+    try {
+      const [
+        savedLocationsCount,
+        activityLogsCount,
+        plannedActivitiesCount,
+        scenarioRatingsCount,
+      ] = await Promise.all([
+        getCount("saved_locations", currentUser.id),
+        getCount("activity_logs", currentUser.id),
+        getCount("planned_activities", currentUser.id),
+        getCount("scenario_ratings", currentUser.id),
+      ]);
+
+      setCounts({
+        savedLocations: savedLocationsCount,
+        activityLogs: activityLogsCount,
+        plannedActivities: plannedActivitiesCount,
+        scenarioRatings: scenarioRatingsCount,
+      });
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      const { data: plansData, error: plansError } = await supabase
+        .from("planned_activities")
+        .select("id,activity,planned_date,planned_window,status,location_name")
+        .eq("user_id", currentUser.id)
+        .gte("planned_date", today)
+        .order("planned_date", { ascending: true })
+        .limit(5);
+
+      if (plansError) {
+        throw plansError;
+      }
+
+      setUpcomingPlans(plansData ?? []);
+
+      const { data: logsData, error: logsError } = await supabase
+        .from("activity_logs")
+        .select("id,activity,date,actual_enjoyment_1_to_10,notes")
+        .eq("user_id", currentUser.id)
+        .order("logged_at", { ascending: false })
+        .limit(5);
+
+      if (logsError) {
+        throw logsError;
+      }
+
+      setRecentLogs(logsData ?? []);
+    } catch (error) {
+      if (error instanceof Error) {
+        setDashboardError(error.message);
+      } else {
+        setDashboardError("Could not load dashboard.");
+      }
+    }
+
+    setLoadingDashboard(false);
   }
 
   if (authLoading) {
     return (
       <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
+        <div className="mx-auto max-w-5xl">
           <p className="text-slate-300">Loading...</p>
         </div>
       </main>
     );
   }
 
-  return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <header>
-          <h1 className="text-3xl font-bold">
-            🌤️ Hobby Weather Planner
-          </h1>
+  if (!user) {
+    return (
+      <main className="min-h-screen bg-slate-950 p-6 text-white">
+        <div className="mx-auto max-w-4xl">
+          <header>
+            <h1 className="text-3xl font-bold">
+              🌤️ Hobby Weather Planner
+            </h1>
 
-          <p className="mt-2 text-slate-300">
-            Next.js prototype connected to Supabase Auth and your app data.
-          </p>
-        </header>
+            <p className="mt-2 text-slate-300">
+              Plan outdoor activities, log how they went, and build smarter
+              personalized recommendations over time.
+            </p>
+          </header>
 
-        {!user ? (
           <section className="mt-8 rounded-2xl bg-slate-900 p-6 shadow">
             <div className="mb-4 flex gap-2">
               <button
@@ -289,184 +294,263 @@ export default function Home() {
               </div>
             )}
           </section>
-        ) : (
-          <section className="mt-8 grid gap-6">
-            <div className="rounded-2xl bg-slate-900 p-5 shadow">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold">
-                    Logged in
-                  </h2>
-                  <p className="text-sm text-slate-300">
-                    {user.email}
-                  </p>
-                </div>
+        </div>
+      </main>
+    );
+  }
 
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="rounded-lg bg-slate-700 px-4 py-2 font-semibold text-white hover:bg-slate-600"
-                >
-                  Log out
-                </button>
-              </div>
-            </div>
+  const scenarioProgress = Math.min(
+    counts.scenarioRatings / SCENARIO_TOTAL_GOAL,
+    1
+  );
 
-            <div className="mt-6 rounded-2xl bg-slate-900 p-5 shadow">
+  return (
+    <main className="min-h-screen bg-slate-950 p-6 text-white">
+      <div className="mx-auto max-w-5xl">
+        <NavBar />
+
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">
+              Welcome back
+            </h1>
+
+            <p className="mt-2 text-slate-300">
+              {user.email}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="rounded-lg bg-slate-700 px-4 py-2 font-semibold text-white hover:bg-slate-600"
+          >
+            Log out
+          </button>
+        </header>
+
+        {dashboardError && (
+          <div className="mt-6 rounded-lg bg-red-900/50 p-3 text-red-200">
+            {dashboardError}
+          </div>
+        )}
+
+        {loadingDashboard && (
+          <p className="mt-6 text-slate-300">Loading dashboard...</p>
+        )}
+
+        <section className="mt-8 grid gap-4 sm:grid-cols-4">
+          <DashboardCard
+            label="Saved Locations"
+            value={counts.savedLocations}
+            href="/locations"
+          />
+
+          <DashboardCard
+            label="Activity Logs"
+            value={counts.activityLogs}
+            href="/logs"
+          />
+
+          <DashboardCard
+            label="Plans"
+            value={counts.plannedActivities}
+            href="/plans"
+          />
+
+          <DashboardCard
+            label="Scenario Ratings"
+            value={counts.scenarioRatings}
+            href="/scenarios"
+          />
+        </section>
+
+        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
               <h2 className="text-xl font-semibold">
-                Add Saved Location
+                Scenario Rating Progress
               </h2>
 
-              <form onSubmit={handleSaveLocation} className="mt-4 grid gap-4">
-                <label className="grid gap-1">
-                  <span className="text-sm text-slate-300">Location name</span>
-                  <input
-                    type="text"
-                    value={newLocationName}
-                    onChange={(event) => setNewLocationName(event.target.value)}
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                    required
-                  />
-                </label>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="grid gap-1">
-                    <span className="text-sm text-slate-300">Latitude</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={newLocationLatitude}
-                      onChange={(event) => setNewLocationLatitude(event.target.value)}
-                      className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                      required
-                    />
-                  </label>
-
-                  <label className="grid gap-1">
-                    <span className="text-sm text-slate-300">Longitude</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={newLocationLongitude}
-                      onChange={(event) => setNewLocationLongitude(event.target.value)}
-                      className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                      required
-                    />
-                  </label>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="grid gap-1">
-                    <span className="text-sm text-slate-300">Location type</span>
-                    <select
-                      value={newLocationType}
-                      onChange={(event) => setNewLocationType(event.target.value)}
-                      className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                    >
-                      <option>Home</option>
-                      <option>Lake</option>
-                      <option>River</option>
-                      <option>Pond</option>
-                      <option>Beach</option>
-                      <option>Park</option>
-                      <option>Disc Golf Course</option>
-                      <option>Tennis Courts</option>
-                      <option>Campground</option>
-                      <option>Trail</option>
-                      <option>Other</option>
-                    </select>
-                  </label>
-
-                  <label className="grid gap-1">
-                    <span className="text-sm text-slate-300">Water type</span>
-                    <select
-                      value={newWaterType}
-                      onChange={(event) => setNewWaterType(event.target.value)}
-                      className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                    >
-                      <option>Not applicable</option>
-                      <option>Freshwater lake</option>
-                      <option>River</option>
-                      <option>Pond</option>
-                      <option>Great Lake</option>
-                      <option>Ocean/coastal</option>
-                      <option>Unknown</option>
-                    </select>
-                  </label>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingLocation}
-                  className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingLocation ? "Saving..." : "Save location"}
-                </button>
-              </form>
-
-              {saveLocationMessage && (
-                <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-                  {saveLocationMessage}
-                </div>
-              )}
-
-              {saveLocationError && (
-                <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-                  {saveLocationError}
-                </div>
-              )}
+              <p className="text-sm text-slate-300">
+                First target: {SCENARIO_TOTAL_GOAL} total ratings
+                ({SCENARIO_GOAL_PER_ACTIVITY} per activity).
+              </p>
             </div>
 
-            <div className="rounded-2xl bg-slate-900 p-5 shadow">
+            <Link
+              href="/scenarios"
+              className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
+            >
+              Rate scenarios
+            </Link>
+          </div>
+
+          <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-800">
+            <div
+              className="h-full rounded-full bg-blue-500"
+              style={{
+                width: `${Math.round(scenarioProgress * 100)}%`,
+              }}
+            />
+          </div>
+
+          <p className="mt-2 text-sm text-slate-300">
+            {counts.scenarioRatings}/{SCENARIO_TOTAL_GOAL} ratings complete
+          </p>
+        </section>
+
+        <section className="mt-8 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl bg-slate-900 p-5 shadow">
+            <div className="flex items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">
-                Saved Locations Test
+                Upcoming Plans
               </h2>
 
-              {locationsLoading && (
-                <p className="mt-4 text-slate-300">
-                  Loading saved locations...
-                </p>
-              )}
+              <Link
+                href="/plans"
+                className="text-sm font-semibold text-blue-300 hover:text-blue-200"
+              >
+                View all
+              </Link>
+            </div>
 
-              {locationsError && (
-                <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-                  {locationsError}
-                </div>
-              )}
-
-              {!locationsLoading &&
-                !locationsError &&
-                locations.length === 0 && (
-                  <p className="mt-4 text-slate-300">
-                    No saved locations found.
-                  </p>
-                )}
-
+            {upcomingPlans.length === 0 ? (
+              <p className="mt-4 text-slate-300">
+                No upcoming plans yet.
+              </p>
+            ) : (
               <div className="mt-4 grid gap-3">
-                {locations.map((location) => (
+                {upcomingPlans.map((plan) => (
                   <div
-                    key={location.id}
+                    key={plan.id}
                     className="rounded-xl border border-slate-700 bg-slate-800 p-4"
                   >
-                    <div className="text-lg font-semibold">
-                      {location.name ?? "Unnamed location"}
+                    <div className="font-semibold">
+                      {plan.activity ?? "Unknown activity"}
                     </div>
 
                     <div className="mt-1 text-sm text-slate-300">
-                      {location.location_type ?? "Unknown type"} ·{" "}
-                      {location.water_type ?? "Unknown water type"}
+                      {plan.planned_date ?? "Unknown date"} ·{" "}
+                      {plan.planned_window || "No window"} ·{" "}
+                      {plan.status ?? "Unknown status"}
                     </div>
 
-                    <div className="mt-1 text-sm text-slate-400">
-                      {location.latitude}, {location.longitude}
-                    </div>
+                    {plan.location_name && (
+                      <div className="mt-1 text-sm text-slate-400">
+                        {plan.location_name}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl bg-slate-900 p-5 shadow">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">
+                Recent Logs
+              </h2>
+
+              <Link
+                href="/logs"
+                className="text-sm font-semibold text-blue-300 hover:text-blue-200"
+              >
+                View all
+              </Link>
             </div>
-          </section>
-        )}
+
+            {recentLogs.length === 0 ? (
+              <p className="mt-4 text-slate-300">
+                No activity logs yet.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-3">
+                {recentLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="rounded-xl border border-slate-700 bg-slate-800 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold">
+                          {log.activity ?? "Unknown activity"}
+                        </div>
+
+                        <div className="mt-1 text-sm text-slate-300">
+                          {log.date ?? "Unknown date"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-full bg-blue-500 px-3 py-1 text-sm font-bold">
+                        {log.actual_enjoyment_1_to_10 ?? "?"}/10
+                      </div>
+                    </div>
+
+                    {log.notes && (
+                      <p className="mt-3 text-sm text-slate-300">
+                        {log.notes}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="text-xl font-semibold">
+            Quick Actions
+          </h2>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <QuickAction href="/locations" label="Add location" />
+            <QuickAction href="/logs" label="Log activity" />
+            <QuickAction href="/plans" label="Create plan" />
+            <QuickAction href="/scenarios" label="Rate scenario" />
+            <QuickAction href="/preferences" label="Edit preferences" />
+          </div>
+        </section>
       </div>
     </main>
+  );
+}
+
+function DashboardCard({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: number;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-2xl bg-slate-900 p-5 shadow hover:bg-slate-800"
+    >
+      <div className="text-3xl font-bold">{value}</div>
+      <div className="mt-1 text-sm text-slate-300">{label}</div>
+    </Link>
+  );
+}
+
+function QuickAction({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
+    >
+      {label}
+    </Link>
   );
 }
