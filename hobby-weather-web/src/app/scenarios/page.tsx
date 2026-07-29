@@ -553,6 +553,45 @@ export default function ScenariosPage() {
         </header>
 
         <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="text-xl font-semibold">Scenario Progress</h2>
+
+          <p className="mt-2 text-sm text-slate-300">
+            First target: 25 ratings per activity.
+          </p>
+
+          <div className="mt-4 grid gap-3">
+            {ACTIVITY_OPTIONS.map((activityOption) => {
+              const count = ratings.filter(
+                (item) => item.activity === activityOption
+              ).length;
+
+              const goal = 25;
+              const progress = Math.min(count / goal, 1);
+
+              return (
+                <div key={activityOption}>
+                  <div className="mb-1 flex items-center justify-between text-sm">
+                    <span>{activityOption}</span>
+                    <span className="text-slate-300">
+                      {count}/{goal}
+                    </span>
+                  </div>
+
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className="h-full rounded-full bg-blue-500"
+                      style={{
+                        width: `${Math.round(progress * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="text-xl font-semibold">Rate a Scenario</h2>
 
           <form onSubmit={handleSaveScenarioRating} className="mt-4 grid gap-5">

@@ -366,6 +366,40 @@ export default function Home() {
         </section>
 
         <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="text-xl font-semibold">Setup Checklist</h2>
+
+          <p className="mt-2 text-sm text-slate-300">
+            Complete these steps to get better recommendations over time.
+          </p>
+
+          <div className="mt-4 grid gap-3">
+            <ChecklistItem
+              complete={counts.savedLocations > 0}
+              label="Add at least one saved location"
+              href="/locations"
+            />
+
+            <ChecklistItem
+              complete={counts.activityLogs > 0}
+              label="Log your first activity"
+              href="/logs"
+            />
+
+            <ChecklistItem
+              complete={counts.plannedActivities > 0}
+              label="Create your first plan"
+              href="/plans"
+            />
+
+            <ChecklistItem
+              complete={counts.scenarioRatings >= 5}
+              label="Rate at least 5 scenarios"
+              href="/scenarios"
+            />
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold">
@@ -551,6 +585,35 @@ function QuickAction({
       className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
     >
       {label}
+    </Link>
+  );
+}
+
+function ChecklistItem({
+  complete,
+  label,
+  href,
+}: {
+  complete: boolean;
+  label: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800 p-4 hover:bg-slate-700"
+    >
+      <span className="font-medium">{label}</span>
+
+      <span
+        className={`rounded-full px-3 py-1 text-xs font-bold ${
+          complete
+            ? "bg-green-600 text-white"
+            : "bg-slate-700 text-slate-300"
+        }`}
+      >
+        {complete ? "Done" : "To do"}
+      </span>
     </Link>
   );
 }
