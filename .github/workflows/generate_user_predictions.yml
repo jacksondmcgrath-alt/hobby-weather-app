@@ -1,0 +1,55 @@
+name: Generate User Predictions
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "15 */3 * * *"  # every 3 hours
+
+  push:
+    branches:
+      - main
+    paths:
+      - "jobs/generate_user_predictions.py"
+      - ".github/workflows/generate_user_predictions.yml"
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install supabase
+
+      - name: Check required secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+
+          required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
+          missing = [key for key in required if not os.environ.get(key)]
+
+          if missing:
+              raise SystemExit(f"Missing required GitHub Actions secrets: {missing}")
+
+          print("Required secrets are present.")
+          print("SUPABASE_URL starts with:", os.environ["SUPABASE_URL"][:25])
+          print("SUPABASE_SERVICE_ROLE_KEY length:", len(os.environ["SUPABASE_SERVICE_ROLE_KEY"]))
+          PY
+
+      - name: Generate user predictions
+        run: python jobs/generate_user_predictions.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
