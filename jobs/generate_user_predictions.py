@@ -466,6 +466,24 @@ def build_user_prediction_row(user_id, prediction, preferences, activity_default
     if location_name:
         explanation += f" Default location for this activity: {location_name}."
 
+    model_input_json = {
+        "activity": activity,
+        "date": prediction.get("date"),
+        "weather": weather_snapshot,
+        "user_preferences": preferences,
+        "default_location": location_context,
+        "rule_score": rule_score,
+        "preference_adjustment": preference_adjustment,
+        "forecast_confidence": forecast_confidence,
+    }
+
+    ml_score = None
+    ml_status = "no_model_available"
+    ml_weight = 0
+    rule_weight = 1
+    blended_score = final_score
+    model_explanation = "No ML model applied yet. Using rule-based score with user preferences and default location context."    
+
     row = {
         "user_id": user_id,
         "date": prediction.get("date"),
@@ -493,21 +511,27 @@ def build_user_prediction_row(user_id, prediction, preferences, activity_default
         "best_species_score": clean_number(prediction.get("best_species_score")),
 
         "rule_score": rule_score,
-        "ml_score": None,
-        "final_score": final_score,
-        "scoring_method": "rules_plus_preferences_locations_v3",
+        "ml_score": ml_score,
+        "final_score": blended_score,
+        "scoring_method": "rules_plus_preferences_locations_ml_ready_v4",
         "model_version": "none",
         "feature_json": feature_json,
         "data_quality_json": data_quality_json,
-        "prediction_source": "github_actions_v3",
+        "prediction_source": "github_actions_v4",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "ml_status": ml_status,
+        "ml_weight": ml_weight,
+        "rule_weight": rule_weight,
+        "blended_score": blended_score,
+        "model_input_json": model_input_json,
+        "model_explanation": model_explanation,
     }
 
     return row
 
 
 def main():
-    print("Starting user prediction generation pipeline v3...")
+    print("Starting user prediction generation pipeline v4...")
 
     supabase = get_supabase_client()
 
@@ -521,7 +545,7 @@ def main():
         if len(users) == 0 or len(prediction_history) == 0:
             log_pipeline_run(
                 supabase,
-                status="completed_no_data_v3",
+                status="completed_no_data_v4",
                 users_processed=len(users),
                 predictions_written=0,
                 error_message=None,
@@ -580,13 +604,13 @@ def main():
 
         log_pipeline_run(
             supabase,
-            status="completed_v3",
+            status="completed_v4",
             users_processed=len(users),
             predictions_written=total_written,
             error_message=None,
         )
 
-        print("User prediction generation v3 complete.")
+        print("User prediction generation v4 complete.")
 
     except Exception as error:
         print(f"Pipeline failed: {error}")
@@ -594,7 +618,7 @@ def main():
         try:
             log_pipeline_run(
                 supabase,
-                status="failed_v3",
+                status="failed_v4",
                 users_processed=0,
                 predictions_written=0,
                 error_message=str(error),
