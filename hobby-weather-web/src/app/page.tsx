@@ -102,7 +102,21 @@ const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
 
     loadDashboard(user);
   }, [user]);
+  async function handleGoogleLogin() {
+    setAuthMessage("");
+    setAuthError("");
 
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setAuthError(error.message);
+    }
+  }
   async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -442,6 +456,20 @@ const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
             <h2 className="text-xl font-semibold">
               {authMode === "login" ? "Log in" : "Create account"}
             </h2>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              className="mt-4 w-full rounded-lg bg-white px-4 py-2 font-semibold text-slate-900 hover:bg-slate-200"
+            >
+              Continue with Google
+            </button>
+
+            <div className="my-4 flex items-center gap-3">
+              <div className="h-px flex-1 bg-slate-700" />
+              <span className="text-xs uppercase text-slate-500">or</span>
+              <div className="h-px flex-1 bg-slate-700" />
+            </div>
 
             <form onSubmit={handleAuthSubmit} className="mt-4 grid gap-4">
               <label className="grid gap-1">
