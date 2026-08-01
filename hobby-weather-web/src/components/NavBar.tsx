@@ -14,6 +14,7 @@ export function NavBar() {
       <NavLink href="/preferences" label="Preferences" />
       <NavLink href="/exports" label="Exports" />
       <NavLink href="/profile" label="Profile" />
+      <NavLink href="/analytics" label="Analytics" />
     </nav>
   );
 }

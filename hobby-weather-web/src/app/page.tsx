@@ -5,6 +5,14 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { NavBar } from "@/components/NavBar";
+import { activityLabel } from "@/lib/activityMeta";
+import {
+  calendarFilename,
+  createIcsEvent,
+  makeIcsDownloadHref,
+  parseWindowToDates,
+} from "@/lib/calendar";
+import { trackEvent } from "@/lib/trackEvent";
 import type { User } from "@supabase/supabase-js";
 
 type DashboardCounts = {
@@ -31,6 +39,25 @@ type ActivityLog = {
   date: string | null;
   actual_enjoyment_1_to_10: number | null;
   notes: string | null;
+};
+
+type PredictionRow = {
+  date: string | null;
+  activity: string | null;
+  predicted_score: number | null;
+  planning_score?: number | null;
+  forecast_confidence?: number | null;
+  forecast_confidence_label?: string | null;
+  label: string | null;
+  explanation: string | null;
+  gear_notes: string | null;
+  avg_temp: number | null;
+  wind_max: number | null;
+  rain_chance: number | null;
+  bug_index: number | null;
+  water_temp_est: number | null;
+  best_species: string | null;
+  best_species_score: number | null;
 };
 
 const SCENARIO_GOAL_PER_ACTIVITY = 25;
@@ -62,6 +89,11 @@ weeklyObligations: 0,
 
   const [upcomingPlans, setUpcomingPlans] = useState<PlannedActivity[]>([]);
   const [recentLogs, setRecentLogs] = useState<ActivityLog[]>([]);
+
+const [topRecommendation, setTopRecommendation] = useState<PredictionRow | null>(null);
+const [recommendationMessage, setRecommendationMessage] = useState("");
+const [recommendationError, setRecommendationError] = useState("");
+const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -138,6 +170,86 @@ weeklyObligations: 0,
     return count ?? 0;
   }
 
+  async function loadTopRecommendation(currentUser: User) {
+    const today = new Date().toISOString().slice(0, 10);
+
+    // 1. Try user-specific predictions first
+    const { data: userPredictionData, error: userPredictionError } = await supabase
+      .from("user_predictions")
+      .select("*")
+      .eq("user_id", currentUser.id)
+      .gte("date", today)
+      .order("date", { ascending: true });
+
+    if (userPredictionError) {
+      throw userPredictionError;
+    }
+
+    if ((userPredictionData ?? []).length > 0) {
+      const cleaned = (userPredictionData ?? []).map((item: any) => ({
+        date: item.date,
+        activity: item.activity,
+        predicted_score: item.predicted_score,
+        planning_score: item.planning_score,
+        forecast_confidence: item.forecast_confidence,
+        forecast_confidence_label: item.forecast_confidence_label,
+        label: item.label,
+        explanation: item.explanation,
+        gear_notes: item.gear_notes,
+        avg_temp: item.weather_snapshot?.avg_temp ?? null,
+        wind_max: item.weather_snapshot?.wind_max ?? null,
+        rain_chance: item.weather_snapshot?.rain_chance ?? null,
+        bug_index: item.weather_snapshot?.bug_index ?? null,
+        water_temp_est: item.weather_snapshot?.water_temp_est ?? null,
+        best_species: item.best_species,
+        best_species_score: item.best_species_score,
+      })) as PredictionRow[];
+
+      const sorted = cleaned.sort(
+        (a, b) =>
+          (b.planning_score ?? b.predicted_score ?? 0) -
+          (a.planning_score ?? a.predicted_score ?? 0)
+      );
+
+      setTopRecommendation(sorted[0] ?? null);
+      return;
+    }
+
+    // 2. Fall back to global prediction_history
+    const { data: fallbackPredictionData, error: fallbackPredictionError } =
+      await supabase
+        .from("prediction_history")
+        .select(
+          [
+            "date",
+            "activity",
+            "predicted_score",
+            "label",
+            "explanation",
+            "gear_notes",
+            "avg_temp",
+            "wind_max",
+            "rain_chance",
+            "bug_index",
+            "water_temp_est",
+            "best_species",
+            "best_species_score",
+          ].join(",")
+        )
+        .gte("date", today)
+        .order("date", { ascending: true });
+
+    if (fallbackPredictionError) {
+      throw fallbackPredictionError;
+    }
+
+    const sortedFallback = (fallbackPredictionData ?? []).sort(
+      (a, b) => (b.predicted_score ?? 0) - (a.predicted_score ?? 0)
+    );
+
+    setTopRecommendation(sortedFallback[0] ?? null);
+  }
+
   async function loadDashboard(currentUser: User) {
     setLoadingDashboard(true);
     setDashboardError("");
@@ -196,6 +308,8 @@ weeklyObligations: 0,
       }
 
       setRecentLogs(logsData ?? []);
+
+      await loadTopRecommendation(currentUser);
     } catch (error) {
       if (error instanceof Error) {
         setDashboardError(error.message);
@@ -205,6 +319,72 @@ weeklyObligations: 0,
     }
 
     setLoadingDashboard(false);
+  }
+
+  async function saveRecommendationAsPlan() {
+    if (!user || !topRecommendation?.date || !topRecommendation?.activity) {
+      return;
+    }
+
+    setSavingRecommendationPlan(true);
+    setRecommendationMessage("");
+    setRecommendationError("");
+
+    const { data: existingPlans, error: existingError } = await supabase
+      .from("planned_activities")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("activity", topRecommendation.activity)
+      .eq("planned_date", topRecommendation.date)
+      .limit(1);
+
+    if (existingError) {
+      setRecommendationError(existingError.message);
+      setSavingRecommendationPlan(false);
+      return;
+    }
+
+    if ((existingPlans ?? []).length > 0) {
+      setRecommendationError("This recommendation is already saved as a plan.");
+      setSavingRecommendationPlan(false);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("planned_activities")
+      .insert({
+        user_id: user.id,
+        activity: topRecommendation.activity,
+        planned_date: topRecommendation.date,
+        planned_window: "Suggested time TBD",
+        status: "Planned",
+        location_name: "",
+        score_at_planning: topRecommendation.predicted_score,
+        planning_score_at_planning: topRecommendation.planning_score ?? null,
+        forecast_confidence_at_planning: topRecommendation.forecast_confidence ?? null,
+        forecast_confidence_label_at_planning:
+          topRecommendation.forecast_confidence_label ?? null,
+        species_target_at_planning: topRecommendation.best_species,
+        notes: "Created from Home recommendation.",
+      });
+
+    if (error) {
+      setRecommendationError(error.message);
+      setSavingRecommendationPlan(false);
+      return;
+    }
+
+    await trackEvent(user.id, "home_recommendation_saved_as_plan", {
+      activity: topRecommendation.activity,
+      date: topRecommendation.date,
+      predicted_score: topRecommendation.predicted_score,
+    });
+
+    setRecommendationMessage("Recommendation saved as a plan.");
+
+    await loadDashboard(user);
+
+    setSavingRecommendationPlan(false);
   }
 
   if (authLoading) {
@@ -376,6 +556,85 @@ weeklyObligations: 0,
             href="/scenarios"
           />
         </section>
+
+        {topRecommendation && (
+          <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">Today&apos;s Recommendation</h2>
+
+                <div className="mt-3 text-2xl font-bold">
+                  {activityLabel(topRecommendation.activity)}
+                </div>
+
+                <div className="mt-2 inline-flex rounded-full bg-blue-500 px-3 py-1 text-sm font-bold text-white">
+                  {topRecommendation.predicted_score ?? "?"} ·{" "}
+                  {topRecommendation.label ?? "No label"}
+                </div>
+
+                <div className="mt-3 text-sm text-slate-300">
+                  {topRecommendation.date ?? "Unknown date"}
+                </div>
+
+                <div className="mt-2 text-sm text-slate-400">
+                  {topRecommendation.avg_temp ?? "?"}°F · wind{" "}
+                  {topRecommendation.wind_max ?? "?"} mph · rain{" "}
+                  {topRecommendation.rain_chance ?? "?"}%
+                </div>
+
+                {topRecommendation.activity === "Fishing" &&
+                  topRecommendation.best_species && (
+                    <div className="mt-2 text-sm text-blue-300">
+                      Best target: {topRecommendation.best_species}{" "}
+                      {topRecommendation.best_species_score !== null
+                        ? `(${topRecommendation.best_species_score})`
+                        : ""}
+                    </div>
+                  )}
+
+                {topRecommendation.explanation && (
+                  <p className="mt-4 text-sm text-slate-300">
+                    {topRecommendation.explanation}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  onClick={saveRecommendationAsPlan}
+                  disabled={savingRecommendationPlan}
+                  className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingRecommendationPlan ? "Saving..." : "Save as plan"}
+                </button>
+
+                {topRecommendation.date && topRecommendation.activity && (
+                  <RecommendationCalendarLink prediction={topRecommendation} />
+                )}
+
+                <Link
+                  href="/planner"
+                  className="rounded-lg bg-slate-700 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-slate-600"
+                >
+                  Open Planner
+                </Link>
+              </div>
+            </div>
+
+            {recommendationMessage && (
+              <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
+                {recommendationMessage}
+              </div>
+            )}
+
+            {recommendationError && (
+              <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
+                {recommendationError}
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="text-xl font-semibold">Setup Checklist</h2>
@@ -639,5 +898,48 @@ function ChecklistItem({
         {complete ? "Done" : "To do"}
       </span>
     </Link>
+  );
+}
+
+function RecommendationCalendarLink({
+  prediction,
+}: {
+  prediction: PredictionRow;
+}) {
+  const windowText = "Suggested time TBD";
+
+  const { start, end } = parseWindowToDates(
+    prediction.date ?? new Date().toISOString().slice(0, 10),
+    windowText
+  );
+
+  const description = [
+    `Predicted score: ${prediction.predicted_score ?? "N/A"} (${prediction.label ?? "No label"})`,
+    `Recommended window: ${windowText}`,
+    "",
+    `Why: ${prediction.explanation ?? "No explanation available."}`,
+    "",
+    `Gear/Safety: ${prediction.gear_notes ?? "No gear notes available."}`,
+  ].join("\n");
+
+  const icsText = createIcsEvent({
+    title: prediction.activity ?? "Activity",
+    start,
+    end,
+    description,
+    location: "",
+  });
+
+  return (
+    <a
+      href={makeIcsDownloadHref(icsText)}
+      download={calendarFilename(
+        prediction.activity ?? "activity",
+        prediction.date ?? "date"
+      )}
+      className="rounded-lg bg-slate-700 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-slate-600"
+    >
+      Add to calendar
+    </a>
   );
 }
