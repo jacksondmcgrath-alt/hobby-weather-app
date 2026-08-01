@@ -25,7 +25,7 @@ def get_supabase_client():
     """
     Uses service role key because this job processes all users.
 
-    Never use the service role key in frontend code.
+    Never use service role key in frontend code.
     """
 
     return create_client(
@@ -79,10 +79,6 @@ def log_pipeline_run(
     predictions_written=0,
     error_message=None,
 ):
-    """
-    Logs the pipeline run for debugging/monitoring.
-    """
-
     row = {
         "run_source": "github_actions",
         "status": status,
@@ -112,10 +108,6 @@ def load_users(supabase):
 
 
 def get_user_id(user):
-    """
-    Handles different possible Supabase user object shapes.
-    """
-
     if isinstance(user, dict):
         return user.get("id")
 
@@ -123,10 +115,6 @@ def get_user_id(user):
 
 
 def load_prediction_history(supabase):
-    """
-    Loads latest global prediction history.
-    """
-
     response = (
         supabase
         .table("prediction_history")
@@ -138,12 +126,6 @@ def load_prediction_history(supabase):
 
 
 def load_user_preferences(supabase, user_id):
-    """
-    Loads one user's saved preferences.
-
-    Falls back to defaults if no preference row exists.
-    """
-
     preferences = DEFAULT_PREFERENCES.copy()
 
     try:
@@ -170,13 +152,103 @@ def load_user_preferences(supabase, user_id):
     return preferences
 
 
+def load_user_saved_locations(supabase, user_id):
+    """
+    Loads saved locations for one user.
+    """
+
+    response = (
+        supabase
+        .table("saved_locations")
+        .select("*")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    return response.data or []
+
+
+def load_user_activity_location_defaults(supabase, user_id):
+    """
+    Loads default saved location by activity for one user.
+    """
+
+    response = (
+        supabase
+        .table("activity_location_defaults")
+        .select("*")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    return response.data or []
+
+
+def build_location_lookup(saved_locations):
+    """
+    Builds a dictionary by location id.
+    """
+
+    lookup = {}
+
+    for location in saved_locations:
+        location_id = location.get("id")
+
+        if location_id is not None:
+            lookup[int(location_id)] = location
+
+    return lookup
+
+
+def build_activity_default_lookup(activity_defaults, location_lookup):
+    """
+    Builds activity -> saved location mapping.
+    """
+
+    lookup = {}
+
+    for item in activity_defaults:
+        activity = item.get("activity")
+        saved_location_id = item.get("saved_location_id")
+
+        if not activity or saved_location_id is None:
+            continue
+
+        location = location_lookup.get(int(saved_location_id))
+
+        if location is not None:
+            lookup[activity] = location
+
+    return lookup
+
+
+def build_location_context(location):
+    """
+    Builds JSON location context for user_predictions.
+    """
+
+    if location is None:
+        return None
+
+    return {
+        "saved_location_id": location.get("id"),
+        "location_name": location.get("name"),
+        "latitude": location.get("latitude"),
+        "longitude": location.get("longitude"),
+        "location_type": location.get("location_type"),
+        "water_type": location.get("water_type"),
+        "water_body_size": location.get("water_body_size"),
+        "wind_exposure": location.get("wind_exposure"),
+        "manual_water_temp": location.get("manual_water_temp"),
+        "use_usgs_water_data": location.get("use_usgs_water_data"),
+        "usgs_site_id": location.get("usgs_site_id"),
+        "use_ndbc_data": location.get("use_ndbc_data"),
+        "ndbc_station_id": location.get("ndbc_station_id"),
+        "notes": location.get("notes"),
+    }
+
+
 def calculate_preference_adjustment(prediction, preferences):
-    """
-    Applies a simplified version of your user preference sliders.
-
-    This lets each user's predictions differ before true ML is added.
-    """
-
     adjustment = 0
 
     activity = prediction.get("activity")
@@ -187,10 +259,6 @@ def calculate_preference_adjustment(prediction, preferences):
     rain_chance = safe_value(prediction.get("rain_chance"), 0)
     bug_index = safe_value(prediction.get("bug_index"), 0)
 
-    # -------------------------
-    # General bug tolerance
-    # -------------------------
-
     bug_tolerance = safe_value(
         preferences.get("bug_tolerance"),
         DEFAULT_PREFERENCES["bug_tolerance"],
@@ -200,10 +268,6 @@ def calculate_preference_adjustment(prediction, preferences):
         if bug_index > 45:
             bug_penalty = ((bug_index - 45) / 10) * (10 - bug_tolerance) * 0.7
             adjustment -= bug_penalty
-
-    # -------------------------
-    # Rain caution
-    # -------------------------
 
     rain_caution = safe_value(
         preferences.get("rain_caution"),
@@ -229,10 +293,6 @@ def calculate_preference_adjustment(prediction, preferences):
         rain_penalty = ((rain_chance - rain_threshold) / 10) * rain_caution * 0.5
         adjustment -= rain_penalty
 
-    # -------------------------
-    # Fishing preferences
-    # -------------------------
-
     if activity == "Fishing":
         fishing_bug_boost = safe_value(
             preferences.get("fishing_bug_boost"),
@@ -254,10 +314,6 @@ def calculate_preference_adjustment(prediction, preferences):
         if 4 <= wind_max <= 12:
             adjustment += fishing_wind_tolerance * 0.4
 
-    # -------------------------
-    # Camping preferences
-    # -------------------------
-
     if activity == "Camping":
         camping_bug_sensitivity = safe_value(
             preferences.get("camping_bug_sensitivity"),
@@ -267,10 +323,6 @@ def calculate_preference_adjustment(prediction, preferences):
         if bug_index > 40:
             bug_penalty = ((bug_index - 40) / 10) * camping_bug_sensitivity * 0.8
             adjustment -= bug_penalty
-
-    # -------------------------
-    # Running preferences
-    # -------------------------
 
     if activity == "Running":
         running_wind_sensitivity = safe_value(
@@ -289,10 +341,6 @@ def calculate_preference_adjustment(prediction, preferences):
         if avg_temp > 60:
             adjustment -= (avg_temp - 60) * running_heat_sensitivity * 0.25
 
-    # -------------------------
-    # Kayaking preferences
-    # -------------------------
-
     if activity == "Kayaking":
         kayaking_wind_caution = safe_value(
             preferences.get("kayaking_wind_caution"),
@@ -304,10 +352,6 @@ def calculate_preference_adjustment(prediction, preferences):
 
         if gust_max > 15:
             adjustment -= (gust_max - 15) * kayaking_wind_caution * 0.25
-
-    # -------------------------
-    # Disc golf preferences
-    # -------------------------
 
     if activity == "Disc Golf":
         disc_golf_wind_sensitivity = safe_value(
@@ -322,11 +366,6 @@ def calculate_preference_adjustment(prediction, preferences):
 
 
 def get_base_rule_score(prediction):
-    """
-    Uses base_predicted_score when available to avoid double-applying
-    one user's existing preference adjustment from prediction_history.
-    """
-
     base_score = clean_number(prediction.get("base_predicted_score"))
 
     if base_score is not None:
@@ -346,11 +385,6 @@ def get_base_rule_score(prediction):
 
 
 def compute_planning_score(final_score, prediction):
-    """
-    Recomputes planning score if forecast confidence is available.
-    Otherwise falls back to existing planning score or final score.
-    """
-
     forecast_confidence = clean_number(prediction.get("forecast_confidence"))
 
     if forecast_confidence is not None:
@@ -364,23 +398,33 @@ def compute_planning_score(final_score, prediction):
     return final_score
 
 
-def build_user_prediction_row(user_id, prediction, preferences):
+def build_user_prediction_row(user_id, prediction, preferences, activity_default_lookup):
     """
     Converts one prediction_history row into one user_predictions row.
 
-    v2:
+    v3:
     - Starts from base/rule score
-    - Applies user's saved preferences
-    - ml_score remains null
-    - final_score is preference-adjusted rule score
+    - Applies user preferences
+    - Adds default saved location context by activity
     """
+
+    activity = prediction.get("activity")
+    default_location = activity_default_lookup.get(activity)
+
+    if default_location is not None:
+        saved_location_id = default_location.get("id")
+        location_name = default_location.get("name")
+        location_context = build_location_context(default_location)
+    else:
+        saved_location_id = None
+        location_name = None
+        location_context = None
 
     rule_score = get_base_rule_score(prediction)
     preference_adjustment = calculate_preference_adjustment(prediction, preferences)
 
     final_score = round(clamp_score(rule_score + preference_adjustment))
     planning_score = compute_planning_score(final_score, prediction)
-
     forecast_confidence = clean_number(prediction.get("forecast_confidence"))
 
     weather_snapshot = {
@@ -395,38 +439,37 @@ def build_user_prediction_row(user_id, prediction, preferences):
 
     feature_json = {
         "source_prediction_id": prediction.get("id"),
-        "base_activity": prediction.get("activity"),
+        "base_activity": activity,
         "weather_snapshot": weather_snapshot,
         "user_preferences": preferences,
         "preference_adjustment": preference_adjustment,
         "base_rule_score": rule_score,
+        "default_location": location_context,
     }
 
     data_quality_json = {
         "prediction_source": "prediction_history",
-        "scoring_pipeline": "v2_user_preferences",
+        "scoring_pipeline": "v3_user_preferences_and_default_locations",
         "ml_used": False,
+        "default_location_used": default_location is not None,
     }
 
     explanation = prediction.get("explanation") or ""
 
     if preference_adjustment > 0:
-        explanation = (
-            explanation
-            + f" Your saved preferences increased this score by {round(preference_adjustment)} points."
-        )
+        explanation += f" Your saved preferences increased this score by {round(preference_adjustment)} points."
     elif preference_adjustment < 0:
-        explanation = (
-            explanation
-            + f" Your saved preferences decreased this score by {abs(round(preference_adjustment))} points."
-        )
+        explanation += f" Your saved preferences decreased this score by {abs(round(preference_adjustment))} points."
     else:
-        explanation = explanation + " Your saved preferences did not change this score."
+        explanation += " Your saved preferences did not change this score."
+
+    if location_name:
+        explanation += f" Default location for this activity: {location_name}."
 
     row = {
         "user_id": user_id,
         "date": prediction.get("date"),
-        "activity": prediction.get("activity"),
+        "activity": activity,
 
         "predicted_score": final_score,
         "planning_score": planning_score,
@@ -437,9 +480,9 @@ def build_user_prediction_row(user_id, prediction, preferences):
         "recommended_window": None,
         "window_score": None,
 
-        "saved_location_id": None,
-        "location_name": None,
-        "location_context": None,
+        "saved_location_id": saved_location_id,
+        "location_name": location_name,
+        "location_context": location_context,
 
         "explanation": explanation,
         "gear_notes": prediction.get("gear_notes"),
@@ -452,11 +495,11 @@ def build_user_prediction_row(user_id, prediction, preferences):
         "rule_score": rule_score,
         "ml_score": None,
         "final_score": final_score,
-        "scoring_method": "rules_plus_user_preferences_v2",
+        "scoring_method": "rules_plus_preferences_locations_v3",
         "model_version": "none",
         "feature_json": feature_json,
         "data_quality_json": data_quality_json,
-        "prediction_source": "github_actions_v2",
+        "prediction_source": "github_actions_v3",
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -464,7 +507,7 @@ def build_user_prediction_row(user_id, prediction, preferences):
 
 
 def main():
-    print("Starting user prediction generation pipeline v2...")
+    print("Starting user prediction generation pipeline v3...")
 
     supabase = get_supabase_client()
 
@@ -478,7 +521,7 @@ def main():
         if len(users) == 0 or len(prediction_history) == 0:
             log_pipeline_run(
                 supabase,
-                status="completed_no_data",
+                status="completed_no_data_v3",
                 users_processed=len(users),
                 predictions_written=0,
                 error_message=None,
@@ -494,6 +537,14 @@ def main():
                 continue
 
             preferences = load_user_preferences(supabase, user_id)
+            saved_locations = load_user_saved_locations(supabase, user_id)
+            activity_defaults = load_user_activity_location_defaults(supabase, user_id)
+
+            location_lookup = build_location_lookup(saved_locations)
+            activity_default_lookup = build_activity_default_lookup(
+                activity_defaults,
+                location_lookup,
+            )
 
             rows_to_upsert = []
 
@@ -506,6 +557,7 @@ def main():
                         user_id=user_id,
                         prediction=prediction,
                         preferences=preferences,
+                        activity_default_lookup=activity_default_lookup,
                     )
                 )
 
@@ -528,13 +580,13 @@ def main():
 
         log_pipeline_run(
             supabase,
-            status="completed_v2",
+            status="completed_v3",
             users_processed=len(users),
             predictions_written=total_written,
             error_message=None,
         )
 
-        print("User prediction generation v2 complete.")
+        print("User prediction generation v3 complete.")
 
     except Exception as error:
         print(f"Pipeline failed: {error}")
@@ -542,7 +594,7 @@ def main():
         try:
             log_pipeline_run(
                 supabase,
-                status="failed_v2",
+                status="failed_v3",
                 users_processed=0,
                 predictions_written=0,
                 error_message=str(error),
