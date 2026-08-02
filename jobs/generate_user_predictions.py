@@ -22,12 +22,6 @@ DEFAULT_PREFERENCES = {
 
 
 def get_supabase_client():
-    """
-    Uses service role key because this job processes all users.
-
-    Never use service role key in frontend code.
-    """
-
     return create_client(
         SUPABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY,
@@ -39,10 +33,6 @@ def clamp_score(score):
 
 
 def clean_number(value):
-    """
-    Converts values to float or None.
-    """
-
     if value is None:
         return None
 
@@ -91,10 +81,6 @@ def log_pipeline_run(
 
 
 def load_users(supabase):
-    """
-    Loads users from Supabase Auth Admin API.
-    """
-
     response = supabase.auth.admin.list_users()
 
     users = response
@@ -125,6 +111,96 @@ def load_prediction_history(supabase):
     return response.data or []
 
 
+def load_latest_time_recommendations(supabase):
+    """
+    Loads the latest time_recommendations JSON from forecast_cache.
+
+    Returns a lookup:
+    {
+        "YYYY-MM-DD": {
+            "Fishing": {"window": "...", "score": 80},
+            ...
+        }
+    }
+    """
+
+    try:
+        response = (
+            supabase
+            .table("forecast_cache")
+            .select("generated_at,time_recommendations")
+            .order("generated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        rows = response.data or []
+
+        if len(rows) == 0:
+            return {}
+
+        time_recommendations = rows[0].get("time_recommendations") or []
+
+        lookup = {}
+
+        for item in time_recommendations:
+            date = item.get("date")
+
+            if not date:
+                continue
+
+            lookup[date] = {
+                "Fishing": {
+                    "window": item.get("Best Fishing Window"),
+                    "score": clean_number(item.get("Fishing Window Score")),
+                },
+                "Running": {
+                    "window": item.get("Best Running Window"),
+                    "score": clean_number(item.get("Running Window Score")),
+                },
+                "Kayaking": {
+                    "window": item.get("Best Kayaking Window"),
+                    "score": clean_number(item.get("Kayaking Window Score")),
+                },
+                "Disc Golf": {
+                    "window": item.get("Best Disc Golf Window"),
+                    "score": clean_number(item.get("Disc Golf Window Score")),
+                },
+                "Tennis": {
+                    "window": item.get("Best Tennis Window"),
+                    "score": clean_number(item.get("Tennis Window Score")),
+                },
+                "Beach Day": {
+                    "window": item.get("Best Beach Day Window"),
+                    "score": clean_number(item.get("Beach Day Window Score")),
+                },
+            }
+
+        return lookup
+
+    except Exception as error:
+        print(f"Could not load time recommendations: {error}")
+        return {}
+
+
+def get_time_recommendation(time_lookup, date, activity):
+    """
+    Returns recommended window and score for a date/activity.
+    """
+
+    if not date or not activity:
+        return None, None
+
+    day_lookup = time_lookup.get(date, {})
+
+    activity_item = day_lookup.get(activity)
+
+    if not activity_item:
+        return None, None
+
+    return activity_item.get("window"), activity_item.get("score")
+
+
 def load_user_preferences(supabase, user_id):
     preferences = DEFAULT_PREFERENCES.copy()
 
@@ -153,10 +229,6 @@ def load_user_preferences(supabase, user_id):
 
 
 def load_user_saved_locations(supabase, user_id):
-    """
-    Loads saved locations for one user.
-    """
-
     response = (
         supabase
         .table("saved_locations")
@@ -169,10 +241,6 @@ def load_user_saved_locations(supabase, user_id):
 
 
 def load_user_activity_location_defaults(supabase, user_id):
-    """
-    Loads default saved location by activity for one user.
-    """
-
     response = (
         supabase
         .table("activity_location_defaults")
@@ -185,10 +253,6 @@ def load_user_activity_location_defaults(supabase, user_id):
 
 
 def build_location_lookup(saved_locations):
-    """
-    Builds a dictionary by location id.
-    """
-
     lookup = {}
 
     for location in saved_locations:
@@ -201,10 +265,6 @@ def build_location_lookup(saved_locations):
 
 
 def build_activity_default_lookup(activity_defaults, location_lookup):
-    """
-    Builds activity -> saved location mapping.
-    """
-
     lookup = {}
 
     for item in activity_defaults:
@@ -223,10 +283,6 @@ def build_activity_default_lookup(activity_defaults, location_lookup):
 
 
 def build_location_context(location):
-    """
-    Builds JSON location context for user_predictions.
-    """
-
     if location is None:
         return None
 
@@ -398,17 +454,16 @@ def compute_planning_score(final_score, prediction):
     return final_score
 
 
-def build_user_prediction_row(user_id, prediction, preferences, activity_default_lookup):
-    """
-    Converts one prediction_history row into one user_predictions row.
-
-    v3:
-    - Starts from base/rule score
-    - Applies user preferences
-    - Adds default saved location context by activity
-    """
-
+def build_user_prediction_row(
+    user_id,
+    prediction,
+    preferences,
+    activity_default_lookup,
+    time_lookup,
+):
     activity = prediction.get("activity")
+    date = prediction.get("date")
+
     default_location = activity_default_lookup.get(activity)
 
     if default_location is not None:
@@ -426,6 +481,12 @@ def build_user_prediction_row(user_id, prediction, preferences, activity_default
     final_score = round(clamp_score(rule_score + preference_adjustment))
     planning_score = compute_planning_score(final_score, prediction)
     forecast_confidence = clean_number(prediction.get("forecast_confidence"))
+
+    recommended_window, window_score = get_time_recommendation(
+        time_lookup,
+        date,
+        activity,
+    )
 
     weather_snapshot = {
         "avg_temp": prediction.get("avg_temp"),
@@ -445,13 +506,15 @@ def build_user_prediction_row(user_id, prediction, preferences, activity_default
         "preference_adjustment": preference_adjustment,
         "base_rule_score": rule_score,
         "default_location": location_context,
+        "time_window_source": "forecast_cache",
     }
 
     data_quality_json = {
         "prediction_source": "prediction_history",
-        "scoring_pipeline": "v3_user_preferences_and_default_locations",
+        "scoring_pipeline": "v4_1_user_preferences_locations_windows",
         "ml_used": False,
         "default_location_used": default_location is not None,
+        "time_window_used": recommended_window is not None,
     }
 
     explanation = prediction.get("explanation") or ""
@@ -466,27 +529,9 @@ def build_user_prediction_row(user_id, prediction, preferences, activity_default
     if location_name:
         explanation += f" Default location for this activity: {location_name}."
 
-    model_input_json = {
-        "activity": activity,
-        "date": prediction.get("date"),
-        "weather": weather_snapshot,
-        "user_preferences": preferences,
-        "default_location": location_context,
-        "rule_score": rule_score,
-        "preference_adjustment": preference_adjustment,
-        "forecast_confidence": forecast_confidence,
-    }
-
-    ml_score = None
-    ml_status = "no_model_available"
-    ml_weight = 0
-    rule_weight = 1
-    blended_score = final_score
-    model_explanation = "No ML model applied yet. Using rule-based score with user preferences and default location context."    
-
     row = {
         "user_id": user_id,
-        "date": prediction.get("date"),
+        "date": date,
         "activity": activity,
 
         "predicted_score": final_score,
@@ -495,8 +540,8 @@ def build_user_prediction_row(user_id, prediction, preferences, activity_default
         "forecast_confidence_label": prediction.get("forecast_confidence_label"),
         "label": score_label(final_score),
 
-        "recommended_window": None,
-        "window_score": None,
+        "recommended_window": recommended_window,
+        "window_score": window_score,
 
         "saved_location_id": saved_location_id,
         "location_name": location_name,
@@ -511,41 +556,57 @@ def build_user_prediction_row(user_id, prediction, preferences, activity_default
         "best_species_score": clean_number(prediction.get("best_species_score")),
 
         "rule_score": rule_score,
-        "ml_score": ml_score,
-        "final_score": blended_score,
-        "scoring_method": "rules_plus_preferences_locations_ml_ready_v4",
+        "ml_score": None,
+        "final_score": final_score,
+        "scoring_method": "rules_plus_preferences_locations_windows_ml_ready_v4_1",
         "model_version": "none",
         "feature_json": feature_json,
         "data_quality_json": data_quality_json,
-        "prediction_source": "github_actions_v4",
+        "prediction_source": "github_actions_v4_1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "ml_status": ml_status,
-        "ml_weight": ml_weight,
-        "rule_weight": rule_weight,
-        "blended_score": blended_score,
-        "model_input_json": model_input_json,
-        "model_explanation": model_explanation,
+
+        "ml_status": "no_model_available",
+        "ml_weight": 0,
+        "rule_weight": 1,
+        "blended_score": final_score,
+        "model_input_json": {
+            "activity": activity,
+            "date": date,
+            "weather": weather_snapshot,
+            "user_preferences": preferences,
+            "default_location": location_context,
+            "recommended_window": recommended_window,
+            "rule_score": rule_score,
+            "preference_adjustment": preference_adjustment,
+            "forecast_confidence": forecast_confidence,
+        },
+        "model_explanation": (
+            "No ML model applied yet. Using rule-based score with user preferences, "
+            "default location context, and cached time window."
+        ),
     }
 
     return row
 
 
 def main():
-    print("Starting user prediction generation pipeline v4...")
+    print("Starting user prediction generation pipeline v4.1...")
 
     supabase = get_supabase_client()
 
     try:
         users = load_users(supabase)
         prediction_history = load_prediction_history(supabase)
+        time_lookup = load_latest_time_recommendations(supabase)
 
         print(f"Users found: {len(users)}")
         print(f"Prediction history rows found: {len(prediction_history)}")
+        print(f"Time recommendation dates found: {len(time_lookup)}")
 
         if len(users) == 0 or len(prediction_history) == 0:
             log_pipeline_run(
                 supabase,
-                status="completed_no_data_v4",
+                status="completed_no_data_v4_1",
                 users_processed=len(users),
                 predictions_written=0,
                 error_message=None,
@@ -582,6 +643,7 @@ def main():
                         prediction=prediction,
                         preferences=preferences,
                         activity_default_lookup=activity_default_lookup,
+                        time_lookup=time_lookup,
                     )
                 )
 
@@ -604,13 +666,13 @@ def main():
 
         log_pipeline_run(
             supabase,
-            status="completed_v4",
+            status="completed_v4_1",
             users_processed=len(users),
             predictions_written=total_written,
             error_message=None,
         )
 
-        print("User prediction generation v4 complete.")
+        print("User prediction generation v4.1 complete.")
 
     except Exception as error:
         print(f"Pipeline failed: {error}")
@@ -618,7 +680,7 @@ def main():
         try:
             log_pipeline_run(
                 supabase,
-                status="failed_v4",
+                status="failed_v4_1",
                 users_processed=0,
                 predictions_written=0,
                 error_message=str(error),

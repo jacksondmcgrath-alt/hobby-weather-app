@@ -27,6 +27,23 @@ type PredictionRow = {
   water_temp_est: number | null;
   best_species: string | null;
   best_species_score: number | null;
+  planning_score: number | null;
+  forecast_confidence: number | null;
+  forecast_confidence_label: string | null;
+  location_name: string | null;
+  rule_score: number | null;
+  ml_score: number | null;
+  final_score: number | null;
+  scoring_method: string | null;
+  model_version: string | null;
+  ml_status: string | null;
+  ml_weight: number | null;
+  rule_weight: number | null;
+  blended_score: number | null;
+  model_explanation: string | null;
+  prediction_source: string | null;
+  recommended_window: string | null;
+  window_score: number | null;
 };
 
 type PlannedActivity = {
@@ -103,6 +120,23 @@ export default function PlannerPage() {
         water_temp_est: item.weather_snapshot?.water_temp_est ?? null,
         best_species: item.best_species,
         best_species_score: item.best_species_score,
+        planning_score: item.planning_score,
+        forecast_confidence: item.forecast_confidence,
+        forecast_confidence_label: item.forecast_confidence_label,
+        location_name: item.location_name,
+        rule_score: item.rule_score,
+        ml_score: item.ml_score,
+        final_score: item.final_score,
+        scoring_method: item.scoring_method,
+        model_version: item.model_version,
+        ml_status: item.ml_status,
+        ml_weight: item.ml_weight,
+        rule_weight: item.rule_weight,
+        blended_score: item.blended_score,
+        model_explanation: item.model_explanation,
+        prediction_source: item.prediction_source,
+        recommended_window: item.recommended_window,
+        window_score: item.window_score,
         }));
     } else {
         // --------------------------------------------------
@@ -138,8 +172,44 @@ export default function PlannerPage() {
         return;
         }
 
-        loadedPredictions = fallbackPredictionData ?? [];
+        loadedPredictions = (fallbackPredictionData ?? []).map((item: any) => ({
+        date: item.date,
+        activity: item.activity,
+        predicted_score: item.predicted_score,
+        planning_score: null,
+        forecast_confidence: null,
+        forecast_confidence_label: null,
+        label: item.label,
+        explanation: item.explanation,
+        gear_notes: item.gear_notes,
+        avg_temp: item.avg_temp,
+        wind_max: item.wind_max,
+        gust_max: item.gust_max,
+        rain_chance: item.rain_chance,
+        bug_index: item.bug_index,
+        water_temp_est: item.water_temp_est,
+        best_species: item.best_species,
+        best_species_score: item.best_species_score,
+        location_name: null,
+        rule_score: null,
+        ml_score: null,
+        final_score: null,
+        scoring_method: "prediction_history_fallback",
+        model_version: null,
+        ml_status: null,
+        ml_weight: null,
+        rule_weight: null,
+        blended_score: null,
+        model_explanation: null,
+        prediction_source: "prediction_history",
+        recommended_window: null,
+        window_score: null,
+        }));
     }
+
+    // --------------------------------------------------
+    // 3. Save predictions to state
+    // --------------------------------------------------
 
     setPredictions(loadedPredictions);
 
@@ -156,7 +226,7 @@ export default function PlannerPage() {
     }
 
     // --------------------------------------------------
-    // 3. Load this user's planned activities
+    // 4. Load this user's planned activities
     // --------------------------------------------------
 
     const { data: plansData, error: plansError } = await supabase
@@ -457,6 +527,21 @@ function PredictionCard({
             {prediction.rain_chance ?? "?"}%
           </div>
 
+          {prediction.location_name && (
+            <div className="mt-2 text-sm text-blue-300">
+                Location: {prediction.location_name}
+            </div>
+            )}
+
+          {prediction.planning_score != null && (
+            <div className="mt-2 text-sm text-slate-300">
+                Planning score: {prediction.planning_score}
+                {prediction.forecast_confidence_label
+                ? ` · ${prediction.forecast_confidence_label}`
+                : ""}
+            </div>
+            )}
+
           <div className="mt-2 text-sm text-slate-300">
             Window: {windowText}
           </div>
@@ -482,6 +567,33 @@ function PredictionCard({
             </p>
           )}
         </div>
+
+        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
+            <details>
+                <summary className="cursor-pointer font-semibold text-white">
+                Scoring details
+                </summary>
+
+                <div className="mt-3 grid gap-1">
+                <div>Rule score: {prediction.rule_score ?? "N/A"}</div>
+                <div>ML score: {prediction.ml_score ?? "N/A"}</div>
+                <div>Final score: {prediction.final_score ?? "N/A"}</div>
+                <div>Blended score: {prediction.blended_score ?? "N/A"}</div>
+                <div>Rule weight: {prediction.rule_weight ?? "N/A"}</div>
+                <div>ML weight: {prediction.ml_weight ?? "N/A"}</div>
+                <div>ML status: {prediction.ml_status ?? "N/A"}</div>
+                <div>Model version: {prediction.model_version ?? "N/A"}</div>
+                <div>Scoring method: {prediction.scoring_method ?? "N/A"}</div>
+                <div>Prediction source: {prediction.prediction_source ?? "N/A"}</div>
+
+                {prediction.model_explanation && (
+                    <div className="mt-2 text-slate-400">
+                    {prediction.model_explanation}
+                    </div>
+                )}
+                </div>
+            </details>
+            </div>
 
         <div className="grid gap-2">
           <div className="rounded-full bg-blue-500 px-3 py-1 text-center text-sm font-bold">

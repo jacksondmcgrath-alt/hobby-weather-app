@@ -60,6 +60,16 @@ type PredictionRow = {
   best_species_score: number | null;
 };
 
+type PipelineRun = {
+  id: number;
+  created_at: string | null;
+  run_source: string | null;
+  status: string | null;
+  users_processed: number | null;
+  predictions_written: number | null;
+  error_message: string | null;
+};
+
 const SCENARIO_GOAL_PER_ACTIVITY = 25;
 const SCENARIO_ACTIVITY_COUNT = 7;
 const SCENARIO_TOTAL_GOAL =
@@ -84,16 +94,18 @@ export default function Home() {
     plannedActivities: 0,
     scenarioRatings: 0,
     activityDefaults: 0,
-weeklyObligations: 0,
+    weeklyObligations: 0,
   });
 
   const [upcomingPlans, setUpcomingPlans] = useState<PlannedActivity[]>([]);
   const [recentLogs, setRecentLogs] = useState<ActivityLog[]>([]);
 
-const [topRecommendation, setTopRecommendation] = useState<PredictionRow | null>(null);
-const [recommendationMessage, setRecommendationMessage] = useState("");
-const [recommendationError, setRecommendationError] = useState("");
-const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
+  const [topRecommendation, setTopRecommendation] = useState<PredictionRow | null>(null);
+  const [recommendationMessage, setRecommendationMessage] = useState("");
+  const [recommendationError, setRecommendationError] = useState("");
+  const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
+
+  const [latestPipelineRun, setLatestPipelineRun] = useState<PipelineRun | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -156,16 +168,18 @@ const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
     await supabase.auth.signOut();
 
     setCounts({
-      savedLocations: savedLocationsCount,
-      activityLogs: activityLogsCount,
-      plannedActivities: plannedActivitiesCount,
-      scenarioRatings: scenarioRatingsCount,
-      activityDefaults: activityDefaultsCount,
-      weeklyObligations: weeklyObligationsCount,
+      savedLocations: 0,
+      activityLogs: 0,
+      plannedActivities: 0,
+      scenarioRatings: 0,
+      activityDefaults: 0,
+      weeklyObligations: 0,
     });
 
     setUpcomingPlans([]);
     setRecentLogs([]);
+    setTopRecommendation(null);
+    setLatestPipelineRun(null);
   }
 
   async function getCount(tableName: string, userId: string) {
@@ -284,6 +298,16 @@ const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
         getCount("activity_location_defaults", currentUser.id),
         getCount("weekly_obligations", currentUser.id),
       ]);
+      
+      const { data: pipelineData, error: pipelineError } = await supabase
+        .from("prediction_pipeline_runs")
+        .select("id,created_at,run_source,status,users_processed,predictions_written,error_message")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (!pipelineError) {
+        setLatestPipelineRun((pipelineData ?? [])[0] ?? null);
+      }
 
       setCounts({
         savedLocations: savedLocationsCount,
@@ -589,7 +613,7 @@ const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
           <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-xl font-semibold">Today&apos;s Recommendation</h2>
+                <h2 className="text-xl font-semibold">Top Upcoming Recommendation</h2>
 
                 <div className="mt-3 text-2xl font-bold">
                   {activityLabel(topRecommendation.activity)}
@@ -663,6 +687,44 @@ const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
             )}
           </section>
         )}
+
+        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="text-xl font-semibold">Prediction Pipeline</h2>
+
+          {latestPipelineRun ? (
+            <div className="mt-4 grid gap-3 text-sm text-slate-300">
+              <div>
+                <span className="font-semibold text-white">Status:</span>{" "}
+                {latestPipelineRun.status ?? "Unknown"}
+              </div>
+
+              <div>
+                <span className="font-semibold text-white">Last run:</span>{" "}
+                {latestPipelineRun.created_at ?? "Unknown"}
+              </div>
+
+              <div>
+                <span className="font-semibold text-white">Users processed:</span>{" "}
+                {latestPipelineRun.users_processed ?? "N/A"}
+              </div>
+
+              <div>
+                <span className="font-semibold text-white">Predictions written:</span>{" "}
+                {latestPipelineRun.predictions_written ?? "N/A"}
+              </div>
+
+              {latestPipelineRun.error_message && (
+                <div className="rounded-lg bg-red-900/50 p-3 text-red-200">
+                  {latestPipelineRun.error_message}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="mt-4 text-slate-300">
+              No prediction pipeline runs found yet.
+            </p>
+          )}
+        </section>
 
         <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="text-xl font-semibold">Setup Checklist</h2>
