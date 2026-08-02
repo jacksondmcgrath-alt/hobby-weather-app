@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
 import { trackEvent } from "@/lib/trackEvent";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type SavedLocation = {
   id: number;
@@ -175,11 +175,12 @@ export default function LocationsPage() {
 
     if (error) {
       setLoadError(error.message);
+      setLocations([]);
       setLoading(false);
       return;
     }
 
-    setLocations(data ?? []);
+    setLocations((data ?? []) as unknown as SavedLocation[]);
     setLoading(false);
   }
 
@@ -321,6 +322,11 @@ export default function LocationsPage() {
     setNdbcStationId("");
     setNotes("");
 
+    setLocationSearch("");
+    setLocationCandidates([]);
+    setSelectedCandidateIndex(0);
+    setLocationSearchError("");
+
     await loadLocations();
 
     setSaving(false);
@@ -439,10 +445,6 @@ export default function LocationsPage() {
     setEditMessage("Location updated.");
     setEditingId(null);
 
-    await trackEvent(user.id, "location_deleted", {
-      location_id: locationId,
-    });
-
     await loadLocations();
 
     setWorkingId(null);
@@ -476,52 +478,42 @@ export default function LocationsPage() {
       return;
     }
 
+    await trackEvent(user.id, "location_deleted", {
+      location_id: locationId,
+    });
+
     await loadLocations();
 
     setWorkingId(null);
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <p className="text-slate-300">Loading...</p>
-        </div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
+      <>
+        <PageHeader title="Saved Locations" />
 
-          <h1 className="text-3xl font-bold">Saved Locations</h1>
-
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+        <Card className="mt-6">
+          <p className="text-slate-300">
             Please log in on the Home page to manage saved locations.
           </p>
-        </div>
-      </main>
+        </Card>
+      </>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+      <PageHeader
+        title="Saved Locations"
+        description="Add and manage places you use for running, fishing, kayaking, tennis, beach days, and more."
+      />
 
-        <header>
-          <h1 className="text-3xl font-bold">Saved Locations</h1>
-          <p className="mt-2 text-slate-300">
-            Add and manage places you use for running, fishing, kayaking,
-            tennis, beach days, and more.
-          </p>
-        </header>
-
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Add Location</h2>
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Add Location</h2>
 
         <div className="mt-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
           <h3 className="font-semibold">Search for a location</h3>
@@ -549,9 +541,9 @@ export default function LocationsPage() {
             </button>
 
             {locationSearchError && (
-              <div className="rounded-lg bg-red-900/50 p-3 text-red-200">
+              <StatusMessage type="error">
                 {locationSearchError}
-              </div>
+              </StatusMessage>
             )}
 
             {locationCandidates.length > 0 && (
@@ -591,321 +583,320 @@ export default function LocationsPage() {
           </div>
         </div>
 
-          <form onSubmit={handleSaveLocation} className="mt-4 grid gap-4">
+        <form onSubmit={handleSaveLocation} className="mt-4 grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm text-slate-300">Location name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Example: Local Pond, Tennis Courts, Kayak Launch"
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+              required
+            />
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Location name</span>
+              <span className="text-sm text-slate-300">Latitude</span>
               <input
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Example: Local Pond, Tennis Courts, Kayak Launch"
+                type="number"
+                step="any"
+                value={latitude}
+                onChange={(event) => setLatitude(event.target.value)}
+                placeholder="42.2808"
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
                 required
               />
             </label>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Latitude</span>
-                <input
-                  type="number"
-                  step="any"
-                  value={latitude}
-                  onChange={(event) => setLatitude(event.target.value)}
-                  placeholder="42.2808"
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                  required
-                />
-              </label>
-
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Longitude</span>
-                <input
-                  type="number"
-                  step="any"
-                  value={longitude}
-                  onChange={(event) => setLongitude(event.target.value)}
-                  placeholder="-83.7430"
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                  required
-                />
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <SelectInput
-                label="Location type"
-                value={locationType}
-                onChange={setLocationType}
-                options={LOCATION_TYPE_OPTIONS}
-              />
-
-              <SelectInput
-                label="Water type"
-                value={waterType}
-                onChange={setWaterType}
-                options={WATER_TYPE_OPTIONS}
-              />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <SelectInput
-                label="Water body size"
-                value={waterBodySize}
-                onChange={setWaterBodySize}
-                options={WATER_BODY_SIZE_OPTIONS}
-              />
-
-              <SelectInput
-                label="Wind exposure"
-                value={windExposure}
-                onChange={setWindExposure}
-                options={WIND_EXPOSURE_OPTIONS}
-              />
-            </div>
-
             <label className="grid gap-1">
-              <span className="text-sm text-slate-300">
-                Manual water temperature °F, optional
-              </span>
+              <span className="text-sm text-slate-300">Longitude</span>
               <input
                 type="number"
                 step="any"
-                value={manualWaterTemp}
-                onChange={(event) => setManualWaterTemp(event.target.value)}
-                placeholder="Example: 68"
+                value={longitude}
+                onChange={(event) => setLongitude(event.target.value)}
+                placeholder="-83.7430"
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                required
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SelectInput
+              label="Location type"
+              value={locationType}
+              onChange={setLocationType}
+              options={LOCATION_TYPE_OPTIONS}
+            />
+
+            <SelectInput
+              label="Water type"
+              value={waterType}
+              onChange={setWaterType}
+              options={WATER_TYPE_OPTIONS}
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SelectInput
+              label="Water body size"
+              value={waterBodySize}
+              onChange={setWaterBodySize}
+              options={WATER_BODY_SIZE_OPTIONS}
+            />
+
+            <SelectInput
+              label="Wind exposure"
+              value={windExposure}
+              onChange={setWindExposure}
+              options={WIND_EXPOSURE_OPTIONS}
+            />
+          </div>
+
+          <label className="grid gap-1">
+            <span className="text-sm text-slate-300">
+              Manual water temperature °F, optional
+            </span>
+            <input
+              type="number"
+              step="any"
+              value={manualWaterTemp}
+              onChange={(event) => setManualWaterTemp(event.target.value)}
+              placeholder="Example: 68"
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+            />
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
+              <input
+                type="checkbox"
+                checked={useUsgsWaterData}
+                onChange={(event) => setUseUsgsWaterData(event.target.checked)}
+              />
+              <span className="text-sm text-slate-300">
+                Use USGS water data
+              </span>
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-sm text-slate-300">USGS site ID</span>
+              <input
+                type="text"
+                value={usgsSiteId}
+                onChange={(event) => setUsgsSiteId(event.target.value)}
+                placeholder="Example: 04174500"
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
               />
             </label>
+          </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
-                <input
-                  type="checkbox"
-                  checked={useUsgsWaterData}
-                  onChange={(event) => setUseUsgsWaterData(event.target.checked)}
-                />
-                <span className="text-sm text-slate-300">
-                  Use USGS water data
-                </span>
-              </label>
-
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">USGS site ID</span>
-                <input
-                  type="text"
-                  value={usgsSiteId}
-                  onChange={(event) => setUsgsSiteId(event.target.value)}
-                  placeholder="Example: 04174500"
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                />
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
-                <input
-                  type="checkbox"
-                  checked={useNdbcData}
-                  onChange={(event) => setUseNdbcData(event.target.checked)}
-                />
-                <span className="text-sm text-slate-300">
-                  Use NOAA/NDBC buoy data
-                </span>
-              </label>
-
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">NDBC station ID</span>
-                <input
-                  type="text"
-                  value={ndbcStationId}
-                  onChange={(event) => setNdbcStationId(event.target.value)}
-                  placeholder="Optional"
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                />
-              </label>
-            </div>
-
-            <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Notes</span>
-              <textarea
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Example: Sheltered from west wind, muddy after rain, good bass spot"
-                className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
+              <input
+                type="checkbox"
+                checked={useNdbcData}
+                onChange={(event) => setUseNdbcData(event.target.checked)}
               />
+              <span className="text-sm text-slate-300">
+                Use NOAA/NDBC buoy data
+              </span>
             </label>
 
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving..." : "Save location"}
-            </button>
-          </form>
-
-          {saveMessage && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {saveMessage}
-            </div>
-          )}
-
-          {saveError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {saveError}
-            </div>
-          )}
-        </section>
-
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Your Saved Locations</h2>
-
-          {loading && (
-            <p className="mt-4 text-slate-300">Loading saved locations...</p>
-          )}
-
-          {loadError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {loadError}
-            </div>
-          )}
-
-          {editMessage && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {editMessage}
-            </div>
-          )}
-
-          {editError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {editError}
-            </div>
-          )}
-
-          {deleteError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {deleteError}
-            </div>
-          )}
-
-          {!loading && !loadError && locations.length === 0 && (
-            <p className="mt-4 text-slate-300">
-              No saved locations yet.
-            </p>
-          )}
-
-          <div className="mt-4 grid gap-3">
-            {locations.map((location) => (
-              <div
-                key={location.id}
-                className="rounded-xl border border-slate-700 bg-slate-800 p-4"
-              >
-                {editingId === location.id ? (
-                  <EditLocationForm
-                    locationId={location.id}
-                    editName={editName}
-                    setEditName={setEditName}
-                    editLatitude={editLatitude}
-                    setEditLatitude={setEditLatitude}
-                    editLongitude={editLongitude}
-                    setEditLongitude={setEditLongitude}
-                    editLocationType={editLocationType}
-                    setEditLocationType={setEditLocationType}
-                    editWaterType={editWaterType}
-                    setEditWaterType={setEditWaterType}
-                    editWaterBodySize={editWaterBodySize}
-                    setEditWaterBodySize={setEditWaterBodySize}
-                    editWindExposure={editWindExposure}
-                    setEditWindExposure={setEditWindExposure}
-                    editManualWaterTemp={editManualWaterTemp}
-                    setEditManualWaterTemp={setEditManualWaterTemp}
-                    editUseUsgsWaterData={editUseUsgsWaterData}
-                    setEditUseUsgsWaterData={setEditUseUsgsWaterData}
-                    editUsgsSiteId={editUsgsSiteId}
-                    setEditUsgsSiteId={setEditUsgsSiteId}
-                    editUseNdbcData={editUseNdbcData}
-                    setEditUseNdbcData={setEditUseNdbcData}
-                    editNdbcStationId={editNdbcStationId}
-                    setEditNdbcStationId={setEditNdbcStationId}
-                    editNotes={editNotes}
-                    setEditNotes={setEditNotes}
-                    workingId={workingId}
-                    onSave={() => saveLocationEdits(location.id)}
-                    onCancel={cancelEditing}
-                  />
-                ) : (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="text-lg font-semibold">
-                        {location.name ?? "Unnamed location"}
-                      </div>
-
-                      <div className="mt-1 text-sm text-slate-300">
-                        {location.location_type ?? "Unknown type"} ·{" "}
-                        {location.water_type ?? "Unknown water type"}
-                      </div>
-
-                      <div className="mt-1 text-sm text-slate-400">
-                        {location.latitude}, {location.longitude}
-                      </div>
-
-                      <div className="mt-2 text-sm text-slate-400">
-                        Water body: {location.water_body_size ?? "N/A"} · Wind exposure:{" "}
-                        {location.wind_exposure ?? "N/A"}
-                      </div>
-
-                      {location.manual_water_temp !== null && (
-                        <div className="mt-1 text-sm text-slate-400">
-                          Manual water temp: {location.manual_water_temp}°F
-                        </div>
-                      )}
-
-                      {location.use_usgs_water_data && (
-                        <div className="mt-1 text-sm text-blue-300">
-                          USGS site: {location.usgs_site_id || "not set"}
-                        </div>
-                      )}
-
-                      {location.use_ndbc_data && (
-                        <div className="mt-1 text-sm text-blue-300">
-                          NDBC station: {location.ndbc_station_id || "not set"}
-                        </div>
-                      )}
-
-                      {location.notes && (
-                        <p className="mt-2 text-sm text-slate-300">
-                          {location.notes}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startEditing(location)}
-                        className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                      >
-                        Edit
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteLocation(location.id)}
-                        disabled={workingId === location.id}
-                        className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {workingId === location.id ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
+            <label className="grid gap-1">
+              <span className="text-sm text-slate-300">NDBC station ID</span>
+              <input
+                type="text"
+                value={ndbcStationId}
+                onChange={(event) => setNdbcStationId(event.target.value)}
+                placeholder="Optional"
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+              />
+            </label>
           </div>
-        </section>
-      </div>
-    </main>
+
+          <label className="grid gap-1">
+            <span className="text-sm text-slate-300">Notes</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Example: Sheltered from west wind, muddy after rain, good bass spot"
+              className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save location"}
+          </button>
+        </form>
+
+        {saveMessage && (
+          <StatusMessage type="success">
+            {saveMessage}
+          </StatusMessage>
+        )}
+
+        {saveError && (
+          <StatusMessage type="error">
+            {saveError}
+          </StatusMessage>
+        )}
+      </Card>
+
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Your Saved Locations</h2>
+
+        {loading && (
+          <p className="mt-4 text-slate-300">Loading saved locations...</p>
+        )}
+
+        {loadError && (
+          <StatusMessage type="error">
+            {loadError}
+          </StatusMessage>
+        )}
+
+        {editMessage && (
+          <StatusMessage type="success">
+            {editMessage}
+          </StatusMessage>
+        )}
+
+        {editError && (
+          <StatusMessage type="error">
+            {editError}
+          </StatusMessage>
+        )}
+
+        {deleteError && (
+          <StatusMessage type="error">
+            {deleteError}
+          </StatusMessage>
+        )}
+
+        {!loading && !loadError && locations.length === 0 && (
+          <p className="mt-4 text-slate-300">
+            No saved locations yet.
+          </p>
+        )}
+
+        <div className="mt-4 grid gap-3">
+          {locations.map((location) => (
+            <div
+              key={location.id}
+              className="rounded-xl border border-slate-700 bg-slate-800 p-4"
+            >
+              {editingId === location.id ? (
+                <EditLocationForm
+                  locationId={location.id}
+                  editName={editName}
+                  setEditName={setEditName}
+                  editLatitude={editLatitude}
+                  setEditLatitude={setEditLatitude}
+                  editLongitude={editLongitude}
+                  setEditLongitude={setEditLongitude}
+                  editLocationType={editLocationType}
+                  setEditLocationType={setEditLocationType}
+                  editWaterType={editWaterType}
+                  setEditWaterType={setEditWaterType}
+                  editWaterBodySize={editWaterBodySize}
+                  setEditWaterBodySize={setEditWaterBodySize}
+                  editWindExposure={editWindExposure}
+                  setEditWindExposure={setEditWindExposure}
+                  editManualWaterTemp={editManualWaterTemp}
+                  setEditManualWaterTemp={setEditManualWaterTemp}
+                  editUseUsgsWaterData={editUseUsgsWaterData}
+                  setEditUseUsgsWaterData={setEditUseUsgsWaterData}
+                  editUsgsSiteId={editUsgsSiteId}
+                  setEditUsgsSiteId={setEditUsgsSiteId}
+                  editUseNdbcData={editUseNdbcData}
+                  setEditUseNdbcData={setEditUseNdbcData}
+                  editNdbcStationId={editNdbcStationId}
+                  setEditNdbcStationId={setEditNdbcStationId}
+                  editNotes={editNotes}
+                  setEditNotes={setEditNotes}
+                  workingId={workingId}
+                  onSave={() => saveLocationEdits(location.id)}
+                  onCancel={cancelEditing}
+                />
+              ) : (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-lg font-semibold">
+                      {location.name ?? "Unnamed location"}
+                    </div>
+
+                    <div className="mt-1 text-sm text-slate-300">
+                      {location.location_type ?? "Unknown type"} ·{" "}
+                      {location.water_type ?? "Unknown water type"}
+                    </div>
+
+                    <div className="mt-1 text-sm text-slate-400">
+                      {location.latitude}, {location.longitude}
+                    </div>
+
+                    <div className="mt-2 text-sm text-slate-400">
+                      Water body: {location.water_body_size ?? "N/A"} · Wind exposure:{" "}
+                      {location.wind_exposure ?? "N/A"}
+                    </div>
+
+                    {location.manual_water_temp !== null && (
+                      <div className="mt-1 text-sm text-slate-400">
+                        Manual water temp: {location.manual_water_temp}°F
+                      </div>
+                    )}
+
+                    {location.use_usgs_water_data && (
+                      <div className="mt-1 text-sm text-blue-300">
+                        USGS site: {location.usgs_site_id || "not set"}
+                      </div>
+                    )}
+
+                    {location.use_ndbc_data && (
+                      <div className="mt-1 text-sm text-blue-300">
+                        NDBC station: {location.ndbc_station_id || "not set"}
+                      </div>
+                    )}
+
+                    {location.notes && (
+                      <p className="mt-2 text-sm text-slate-300">
+                        {location.notes}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startEditing(location)}
+                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteLocation(location.id)}
+                      disabled={workingId === location.id}
+                      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {workingId === location.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </>
   );
 }
 
@@ -1009,6 +1000,7 @@ function EditLocationForm({
           type="text"
           value={editName}
           onChange={(event) => setEditName(event.target.value)}
+          required
           className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
         />
       </label>
@@ -1021,6 +1013,7 @@ function EditLocationForm({
             step="any"
             value={editLatitude}
             onChange={(event) => setEditLatitude(event.target.value)}
+            required
             className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
           />
         </label>
@@ -1032,6 +1025,7 @@ function EditLocationForm({
             step="any"
             value={editLongitude}
             onChange={(event) => setEditLongitude(event.target.value)}
+            required
             className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
           />
         </label>

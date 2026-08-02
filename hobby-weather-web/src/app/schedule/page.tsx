@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
 import { trackEvent } from "@/lib/trackEvent";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type WeeklyObligation = {
   id: number;
@@ -98,6 +98,7 @@ export default function SchedulePage() {
 
     if (error) {
       setLoadError(error.message);
+      setObligations([]);
       setLoading(false);
       return;
     }
@@ -119,6 +120,12 @@ export default function SchedulePage() {
       return;
     }
 
+    if (endTime <= startTime) {
+      setErrorMessage("End time must be after start time.");
+      setSaving(false);
+      return;
+    }
+
     const { error } = await supabase
       .from("weekly_obligations")
       .insert({
@@ -136,16 +143,16 @@ export default function SchedulePage() {
       return;
     }
 
-    setLabel("");
-    setStartTime("08:00");
-    setEndTime("17:00");
-
     await trackEvent(user.id, "weekly_obligation_created", {
       label,
       day_of_week: dayOfWeek,
       start_time: startTime,
       end_time: endTime,
     });
+
+    setLabel("");
+    setStartTime("08:00");
+    setEndTime("17:00");
 
     setMessage("Schedule block saved.");
 
@@ -218,6 +225,12 @@ export default function SchedulePage() {
     setMessage("");
     setErrorMessage("");
 
+    if (editEndTime <= editStartTime) {
+        setErrorMessage("End time must be after start time.");
+        setWorkingId(null);
+        return;
+    }
+
     const { error } = await supabase
       .from("weekly_obligations")
       .update({
@@ -248,10 +261,6 @@ export default function SchedulePage() {
     setMessage("Schedule block updated.");
     setEditingId(null);
 
-    await trackEvent(user.id, "weekly_obligation_deleted", {
-      obligation_id: id,
-    });
-
     await loadObligations();
     setWorkingId(null);
   }
@@ -275,6 +284,11 @@ export default function SchedulePage() {
       setWorkingId(null);
       return;
     }
+
+    await trackEvent(user.id, "weekly_obligation_toggled", {
+      obligation_id: obligation.id,
+      active: obligation.active === false,
+    });
 
     await loadObligations();
     setWorkingId(null);
@@ -304,309 +318,305 @@ export default function SchedulePage() {
       return;
     }
 
+    await trackEvent(user.id, "weekly_obligation_deleted", {
+      obligation_id: id,
+    });
+
     await loadObligations();
     setWorkingId(null);
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">Loading...</div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
-          <h1 className="text-3xl font-bold">Weekly Schedule</h1>
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+        <>
+        <PageHeader title="Weekly Schedule" />
+
+        <Card className="mt-6">
+            <p className="text-slate-300">
             Please log in to manage your schedule.
-          </p>
-        </div>
-      </main>
+            </p>
+        </Card>
+        </>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+        <PageHeader
+        title="Weekly Schedule"
+        description="Add recurring times when you are unavailable. Future suggested windows can avoid these times."
+        />
 
-        <h1 className="text-3xl font-bold">Weekly Schedule</h1>
-        <p className="mt-2 text-slate-300">
-          Add recurring times when you are unavailable. Future suggested windows can avoid these times.
-        </p>
+      <section className="mt-8 grid gap-4 sm:grid-cols-4">
+        <SummaryCard label="Total" value={summary.total} />
+        <SummaryCard label="Active" value={summary.active} />
+        <SummaryCard label="Inactive" value={summary.inactive} />
+        <SummaryCard label="Days Blocked" value={summary.daysBlocked} />
+      </section>
 
-        <section className="mt-8 grid gap-4 sm:grid-cols-4">
-          <SummaryCard label="Total" value={summary.total} />
-          <SummaryCard label="Active" value={summary.active} />
-          <SummaryCard label="Inactive" value={summary.inactive} />
-          <SummaryCard label="Days Blocked" value={summary.daysBlocked} />
-        </section>
-
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">Add Unavailable Time</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Add work, class, practice, or other recurring obligations.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={addWorkweekPreset}
-              disabled={saving}
-              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Add Mon–Fri 8–5 Work
-            </button>
+      <Card className="mt-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Add Unavailable Time</h2>
+            <p className="mt-1 text-sm text-slate-300">
+              Add work, class, practice, or other recurring obligations.
+            </p>
           </div>
 
-          <form onSubmit={saveObligation} className="mt-4 grid gap-4">
+          <button
+            type="button"
+            onClick={addWorkweekPreset}
+            disabled={saving}
+            className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Add Mon–Fri 8–5 Work
+          </button>
+        </div>
+
+        <form onSubmit={saveObligation} className="mt-4 grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm text-slate-300">Label</span>
+            <input
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="Example: Work, Class, Practice"
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+              required
+            />
+          </label>
+
+          <label className="grid gap-1">
+            <span className="text-sm text-slate-300">Day</span>
+            <select
+              value={dayOfWeek}
+              onChange={(event) => setDayOfWeek(Number(event.target.value))}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+            >
+              {DAY_OPTIONS.map((day) => (
+                <option key={day.value} value={day.value}>
+                  {day.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Label</span>
+              <span className="text-sm text-slate-300">Start time</span>
               <input
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-                placeholder="Example: Work, Class, Practice"
+                type="time"
+                value={startTime}
+                onChange={(event) => setStartTime(event.target.value)}
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                required
               />
             </label>
 
             <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Day</span>
-              <select
-                value={dayOfWeek}
-                onChange={(event) => setDayOfWeek(Number(event.target.value))}
+              <span className="text-sm text-slate-300">End time</span>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(event) => setEndTime(event.target.value)}
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-              >
-                {DAY_OPTIONS.map((day) => (
-                  <option key={day.value} value={day.value}>
-                    {day.label}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Start time</span>
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={(event) => setStartTime(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                />
-              </label>
-
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">End time</span>
-                <input
-                  type="time"
-                  value={endTime}
-                  onChange={(event) => setEndTime(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                />
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving..." : "Save schedule block"}
-            </button>
-          </form>
-
-          {message && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {message}
-            </div>
-          )}
-
-          {errorMessage && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {errorMessage}
-            </div>
-          )}
-        </section>
-
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Your Weekly Schedule</h2>
-
-          {loading && (
-            <p className="mt-4 text-slate-300">Loading schedule...</p>
-          )}
-
-          {loadError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {loadError}
-            </div>
-          )}
-
-          {!loading && !loadError && obligations.length === 0 && (
-            <p className="mt-4 text-slate-300">No schedule blocks yet.</p>
-          )}
-
-          <div className="mt-4 grid gap-3">
-            {obligations.map((obligation) => (
-              <div
-                key={obligation.id}
-                className={`rounded-xl border p-4 ${
-                  obligation.active === false
-                    ? "border-slate-800 bg-slate-900 opacity-70"
-                    : "border-slate-700 bg-slate-800"
-                }`}
-              >
-                {editingId === obligation.id ? (
-                  <div className="grid gap-4">
-                    <div className="font-semibold">Editing schedule block</div>
-
-                    <label className="grid gap-1">
-                      <span className="text-sm text-slate-300">Label</span>
-                      <input
-                        value={editLabel}
-                        onChange={(event) => setEditLabel(event.target.value)}
-                        className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                      />
-                    </label>
-
-                    <label className="grid gap-1">
-                      <span className="text-sm text-slate-300">Day</span>
-                      <select
-                        value={editDayOfWeek}
-                        onChange={(event) =>
-                          setEditDayOfWeek(Number(event.target.value))
-                        }
-                        className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                      >
-                        {DAY_OPTIONS.map((day) => (
-                          <option key={day.value} value={day.value}>
-                            {day.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="grid gap-1">
-                        <span className="text-sm text-slate-300">Start time</span>
-                        <input
-                          type="time"
-                          value={editStartTime}
-                          onChange={(event) =>
-                            setEditStartTime(event.target.value)
-                          }
-                          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                        />
-                      </label>
-
-                      <label className="grid gap-1">
-                        <span className="text-sm text-slate-300">End time</span>
-                        <input
-                          type="time"
-                          value={editEndTime}
-                          onChange={(event) =>
-                            setEditEndTime(event.target.value)
-                          }
-                          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                        />
-                      </label>
-                    </div>
-
-                    <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-3">
-                      <input
-                        type="checkbox"
-                        checked={editActive}
-                        onChange={(event) =>
-                          setEditActive(event.target.checked)
-                        }
-                      />
-                      <span className="text-sm text-slate-300">Active</span>
-                    </label>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => saveEdits(obligation.id)}
-                        disabled={workingId === obligation.id}
-                        className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {workingId === obligation.id ? "Saving..." : "Save edits"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={cancelEditing}
-                        className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="font-semibold">
-                        {obligation.label ?? "Unnamed block"}
-                      </div>
-
-                      <div className="mt-1 text-sm text-slate-300">
-                        {dayLabel(obligation.day_of_week)} · {obligation.start_time}–{obligation.end_time}
-                      </div>
-
-                      <div
-                        className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
-                          obligation.active === false
-                            ? "bg-slate-700 text-slate-300"
-                            : "bg-green-600 text-white"
-                        }`}
-                      >
-                        {obligation.active === false ? "Inactive" : "Active"}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startEditing(obligation)}
-                        className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                      >
-                        Edit
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => toggleActive(obligation)}
-                        disabled={workingId === obligation.id}
-                        className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {obligation.active === false ? "Activate" : "Deactivate"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => deleteObligation(obligation.id)}
-                        disabled={workingId === obligation.id}
-                        className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {workingId === obligation.id ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
-        </section>
-      </div>
-    </main>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save schedule block"}
+          </button>
+        </form>
+
+        {message && (
+          <StatusMessage type="success">
+            {message}
+          </StatusMessage>
+        )}
+
+        {errorMessage && (
+          <StatusMessage type="error">
+            {errorMessage}
+          </StatusMessage>
+        )}
+      </Card>
+
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Your Weekly Schedule</h2>
+
+        {loading && (
+          <p className="mt-4 text-slate-300">Loading schedule...</p>
+        )}
+
+        {loadError && (
+          <StatusMessage type="error">
+            {loadError}
+          </StatusMessage>
+        )}
+
+        {!loading && !loadError && obligations.length === 0 && (
+          <p className="mt-4 text-slate-300">No schedule blocks yet.</p>
+        )}
+
+        <div className="mt-4 grid gap-3">
+          {obligations.map((obligation) => (
+            <div
+              key={obligation.id}
+              className={`rounded-xl border p-4 ${
+                obligation.active === false
+                  ? "border-slate-800 bg-slate-900 opacity-70"
+                  : "border-slate-700 bg-slate-800"
+              }`}
+            >
+              {editingId === obligation.id ? (
+                <div className="grid gap-4">
+                  <div className="font-semibold">Editing schedule block</div>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm text-slate-300">Label</span>
+                    <input
+                      value={editLabel}
+                      onChange={(event) => setEditLabel(event.target.value)}
+                      className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm text-slate-300">Day</span>
+                    <select
+                      value={editDayOfWeek}
+                      onChange={(event) =>
+                        setEditDayOfWeek(Number(event.target.value))
+                      }
+                      className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+                    >
+                      {DAY_OPTIONS.map((day) => (
+                        <option key={day.value} value={day.value}>
+                          {day.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="grid gap-1">
+                      <span className="text-sm text-slate-300">Start time</span>
+                      <input
+                        type="time"
+                        value={editStartTime}
+                        onChange={(event) =>
+                          setEditStartTime(event.target.value)
+                        }
+                        className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm text-slate-300">End time</span>
+                      <input
+                        type="time"
+                        value={editEndTime}
+                        onChange={(event) =>
+                          setEditEndTime(event.target.value)
+                        }
+                        className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-3">
+                    <input
+                      type="checkbox"
+                      checked={editActive}
+                      onChange={(event) =>
+                        setEditActive(event.target.checked)
+                      }
+                    />
+                    <span className="text-sm text-slate-300">Active</span>
+                  </label>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => saveEdits(obligation.id)}
+                      disabled={workingId === obligation.id}
+                      className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {workingId === obligation.id ? "Saving..." : "Save edits"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={cancelEditing}
+                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="font-semibold">
+                      {obligation.label ?? "Unnamed block"}
+                    </div>
+
+                    <div className="mt-1 text-sm text-slate-300">
+                      {dayLabel(obligation.day_of_week)} · {obligation.start_time}–{obligation.end_time}
+                    </div>
+
+                    <div
+                      className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                        obligation.active === false
+                          ? "bg-slate-700 text-slate-300"
+                          : "bg-green-600 text-white"
+                      }`}
+                    >
+                      {obligation.active === false ? "Inactive" : "Active"}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startEditing(obligation)}
+                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleActive(obligation)}
+                      disabled={workingId === obligation.id}
+                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {obligation.active === false ? "Activate" : "Deactivate"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteObligation(obligation.id)}
+                      disabled={workingId === obligation.id}
+                      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {workingId === obligation.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </>
   );
 }
 
@@ -618,7 +628,7 @@ function SummaryCard({
   value: number;
 }) {
   return (
-    <div className="rounded-2xl bg-slate-900 p-5 shadow">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow">
       <div className="text-3xl font-bold">{value}</div>
       <div className="mt-1 text-sm text-slate-300">{label}</div>
     </div>

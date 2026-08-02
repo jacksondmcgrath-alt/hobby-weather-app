@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
 import { ACTIVITY_OPTIONS, activityLabel } from "@/lib/activityMeta";
 import { trackEvent } from "@/lib/trackEvent";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type SavedLocation = {
   id: number;
@@ -25,7 +26,6 @@ export default function ActivityDefaultsPage() {
   const { user, authLoading } = useUser();
 
   const [locations, setLocations] = useState<SavedLocation[]>([]);
-  const [defaults, setDefaults] = useState<ActivityDefault[]>([]);
 
   const [selectedDefaults, setSelectedDefaults] = useState<Record<string, string>>(
     {}
@@ -40,7 +40,6 @@ export default function ActivityDefaultsPage() {
   useEffect(() => {
     if (!user) {
       setLocations([]);
-      setDefaults([]);
       setSelectedDefaults({});
       return;
     }
@@ -72,6 +71,7 @@ export default function ActivityDefaultsPage() {
 
     if (locationError) {
       setErrorMessage(locationError.message);
+      setLocations([]);
       setLoading(false);
       return;
     }
@@ -83,6 +83,7 @@ export default function ActivityDefaultsPage() {
 
     if (defaultError) {
       setErrorMessage(defaultError.message);
+      setLocations(locationData ?? []);
       setLoading(false);
       return;
     }
@@ -91,7 +92,6 @@ export default function ActivityDefaultsPage() {
     const loadedDefaults = defaultData ?? [];
 
     setLocations(loadedLocations);
-    setDefaults(loadedDefaults);
 
     const defaultMap: Record<string, string> = {};
 
@@ -224,173 +224,161 @@ export default function ActivityDefaultsPage() {
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">Loading...</div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
-          <h1 className="text-3xl font-bold">Activity Defaults</h1>
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+        <>
+        <PageHeader title="Activity Defaults" />
+
+        <Card className="mt-6">
+            <p className="text-slate-300">
             Please log in to manage activity defaults.
-          </p>
-        </div>
-      </main>
+            </p>
+        </Card>
+        </>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+        <PageHeader
+        title="Activity Defaults"
+        description="Choose which saved location should be used by default for each activity."
+      />
 
-        <header>
-          <h1 className="text-3xl font-bold">Activity Defaults</h1>
+      {message && (
+        <StatusMessage type="success">
+          {message}
+        </StatusMessage>
+      )}
+
+      {errorMessage && (
+        <StatusMessage type="error">
+          {errorMessage}
+        </StatusMessage>
+      )}
+
+      {loading && (
+        <p className="mt-6 text-slate-300">Loading activity defaults...</p>
+      )}
+
+      <section className="mt-8 grid gap-4 sm:grid-cols-3">
+        <SummaryCard
+          label="Activities"
+          value={ACTIVITY_OPTIONS.length}
+        />
+
+        <SummaryCard
+          label="Configured"
+          value={configuredCount}
+        />
+
+        <SummaryCard
+          label="Missing"
+          value={missingCount}
+        />
+      </section>
+
+      {locations.length === 0 ? (
+        <Card className="mt-8">
+          <h2 className="text-xl font-semibold">No saved locations yet</h2>
+
           <p className="mt-2 text-slate-300">
-            Choose which saved location should be used by default for each activity.
+            Add saved locations before setting defaults.
           </p>
-        </header>
 
-        {message && (
-          <div className="mt-6 rounded-lg bg-green-900/50 p-3 text-green-200">
-            {message}
-          </div>
-        )}
+          <Link
+            href="/locations"
+            className="mt-4 inline-block rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400"
+          >
+            Add locations
+          </Link>
+        </Card>
+      ) : (
+        <section className="mt-8 grid gap-4">
+          {ACTIVITY_OPTIONS.map((activity) => {
+            const selectedLocationId = selectedDefaults[activity] ?? "";
+            const hasDefault = selectedLocationId !== "";
 
-        {errorMessage && (
-          <div className="mt-6 rounded-lg bg-red-900/50 p-3 text-red-200">
-            {errorMessage}
-          </div>
-        )}
+            return (
+              <Card key={activity}>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold">
+                      {activityLabel(activity)}
+                    </h2>
 
-        {loading && (
-          <p className="mt-6 text-slate-300">Loading activity defaults...</p>
-        )}
+                    <p className="mt-1 text-sm text-slate-300">
+                      Current default:{" "}
+                      <span className="font-semibold text-white">
+                        {getLocationLabel(selectedLocationId)}
+                      </span>
+                    </p>
 
-        <section className="mt-8 grid gap-4 sm:grid-cols-3">
-          <SummaryCard
-            label="Activities"
-            value={ACTIVITY_OPTIONS.length}
-          />
-
-          <SummaryCard
-            label="Configured"
-            value={configuredCount}
-          />
-
-          <SummaryCard
-            label="Missing"
-            value={missingCount}
-          />
-        </section>
-
-        {locations.length === 0 ? (
-          <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-            <h2 className="text-xl font-semibold">No saved locations yet</h2>
-            <p className="mt-2 text-slate-300">
-              Add saved locations before setting defaults.
-            </p>
-
-            <a
-              href="/locations"
-              className="mt-4 inline-block rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400"
-            >
-              Add locations
-            </a>
-          </section>
-        ) : (
-          <section className="mt-8 grid gap-4">
-            {ACTIVITY_OPTIONS.map((activity) => {
-              const selectedLocationId = selectedDefaults[activity] ?? "";
-              const hasDefault = selectedLocationId !== "";
-
-              return (
-                <div
-                  key={activity}
-                  className="rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow"
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h2 className="text-xl font-semibold">
-                        {activityLabel(activity)}
-                      </h2>
-
-                      <p className="mt-1 text-sm text-slate-300">
-                        Current default:{" "}
-                        <span className="font-semibold text-white">
-                          {getLocationLabel(selectedLocationId)}
-                        </span>
-                      </p>
-
-                      <div
-                        className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
-                          hasDefault
-                            ? "bg-green-600 text-white"
-                            : "bg-slate-700 text-slate-300"
-                        }`}
-                      >
-                        {hasDefault ? "Configured" : "No default"}
-                      </div>
+                    <div
+                      className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                        hasDefault
+                          ? "bg-green-600 text-white"
+                          : "bg-slate-700 text-slate-300"
+                      }`}
+                    >
+                      {hasDefault ? "Configured" : "No default"}
                     </div>
+                  </div>
 
-                    <div className="grid w-full gap-3 sm:max-w-md">
-                      <label className="grid gap-1">
-                        <span className="text-sm text-slate-300">
-                          Default location
-                        </span>
+                  <div className="grid w-full gap-3 sm:max-w-md">
+                    <label className="grid gap-1">
+                      <span className="text-sm text-slate-300">
+                        Default location
+                      </span>
 
-                        <select
-                          value={selectedLocationId}
-                          onChange={(event) =>
-                            updateSelectedDefault(activity, event.target.value)
-                          }
-                          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                        >
-                          <option value="">No default</option>
+                      <select
+                        value={selectedLocationId}
+                        onChange={(event) =>
+                          updateSelectedDefault(activity, event.target.value)
+                        }
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                      >
+                        <option value="">No default</option>
 
-                          {locations.map((location) => (
-                            <option key={location.id} value={location.id}>
-                              {location.name ?? "Unnamed location"}{" "}
-                              ({location.location_type ?? "Location"})
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                        {locations.map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.name ?? "Unnamed location"}{" "}
+                            ({location.location_type ?? "Location"})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => saveDefault(activity)}
-                          disabled={workingActivity === activity}
-                          className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {workingActivity === activity ? "Saving..." : "Save"}
-                        </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => saveDefault(activity)}
+                        disabled={workingActivity === activity}
+                        className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {workingActivity === activity ? "Saving..." : "Save"}
+                      </button>
 
-                        <button
-                          type="button"
-                          onClick={() => clearDefault(activity)}
-                          disabled={workingActivity === activity}
-                          className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Clear
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => clearDefault(activity)}
+                        disabled={workingActivity === activity}
+                        className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Clear
+                      </button>
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          </section>
-        )}
-      </div>
-    </main>
+              </Card>
+            );
+          })}
+        </section>
+      )}
+    </>
   );
 }
 
@@ -402,9 +390,9 @@ function SummaryCard({
   value: number;
 }) {
   return (
-    <div className="rounded-2xl bg-slate-900 p-5 shadow">
+    <Card>
       <div className="text-3xl font-bold">{value}</div>
       <div className="mt-1 text-sm text-slate-300">{label}</div>
-    </div>
+    </Card>
   );
 }

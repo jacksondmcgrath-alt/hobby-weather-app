@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
 import { activityLabel } from "@/lib/activityMeta";
 import {
   calendarFilename,
@@ -11,6 +10,7 @@ import {
   makeIcsDownloadHref,
   parseWindowToDates,
 } from "@/lib/calendar";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type PredictionRow = {
   date: string | null;
@@ -93,19 +93,19 @@ export default function PlannerPage() {
     // --------------------------------------------------
 
     const { data: userPredictionData, error: userPredictionError } = await supabase
-        .from("user_predictions")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("date", { ascending: true });
+      .from("user_predictions")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("date", { ascending: true });
 
     if (userPredictionError) {
-        setErrorMessage(userPredictionError.message);
-        setLoading(false);
-        return;
+      setErrorMessage(userPredictionError.message);
+      setLoading(false);
+      return;
     }
 
     if ((userPredictionData ?? []).length > 0) {
-        loadedPredictions = (userPredictionData ?? []).map((item: any) => ({
+      loadedPredictions = (userPredictionData ?? []).map((item: any) => ({
         date: item.date,
         activity: item.activity,
         predicted_score: item.predicted_score,
@@ -137,42 +137,42 @@ export default function PlannerPage() {
         prediction_source: item.prediction_source,
         recommended_window: item.recommended_window,
         window_score: item.window_score,
-        }));
+      }));
     } else {
-        // --------------------------------------------------
-        // 2. Fall back to global prediction_history
-        // --------------------------------------------------
+      // --------------------------------------------------
+      // 2. Fall back to global prediction_history
+      // --------------------------------------------------
 
-        const { data: fallbackPredictionData, error: fallbackPredictionError } =
+      const { data: fallbackPredictionData, error: fallbackPredictionError } =
         await supabase
-            .from("prediction_history")
-            .select(
+          .from("prediction_history")
+          .select(
             [
-                "date",
-                "activity",
-                "predicted_score",
-                "label",
-                "explanation",
-                "gear_notes",
-                "avg_temp",
-                "wind_max",
-                "gust_max",
-                "rain_chance",
-                "bug_index",
-                "water_temp_est",
-                "best_species",
-                "best_species_score",
+              "date",
+              "activity",
+              "predicted_score",
+              "label",
+              "explanation",
+              "gear_notes",
+              "avg_temp",
+              "wind_max",
+              "gust_max",
+              "rain_chance",
+              "bug_index",
+              "water_temp_est",
+              "best_species",
+              "best_species_score",
             ].join(",")
-            )
-            .order("date", { ascending: true });
+          )
+          .order("date", { ascending: true });
 
-        if (fallbackPredictionError) {
+      if (fallbackPredictionError) {
         setErrorMessage(fallbackPredictionError.message);
         setLoading(false);
         return;
-        }
+      }
 
-        loadedPredictions = (fallbackPredictionData ?? []).map((item: any) => ({
+      loadedPredictions = (fallbackPredictionData ?? []).map((item: any) => ({
         date: item.date,
         activity: item.activity,
         predicted_score: item.predicted_score,
@@ -204,46 +204,37 @@ export default function PlannerPage() {
         prediction_source: "prediction_history",
         recommended_window: null,
         window_score: null,
-        }));
+      }));
     }
-
-    // --------------------------------------------------
-    // 3. Save predictions to state
-    // --------------------------------------------------
 
     setPredictions(loadedPredictions);
 
     const dates = Array.from(
-        new Set(
+      new Set(
         loadedPredictions
-            .map((item) => item.date)
-            .filter(Boolean)
-        )
+          .map((item) => item.date)
+          .filter(Boolean)
+      )
     ) as string[];
 
     if (dates.length > 0 && selectedDate === "") {
-        setSelectedDate(dates[0]);
+      setSelectedDate(dates[0]);
     }
 
-    // --------------------------------------------------
-    // 4. Load this user's planned activities
-    // --------------------------------------------------
-
     const { data: plansData, error: plansError } = await supabase
-        .from("planned_activities")
-        .select("id,activity,planned_date,planned_window")
-        .eq("user_id", user.id);
+      .from("planned_activities")
+      .select("id,activity,planned_date,planned_window")
+      .eq("user_id", user.id);
 
     if (plansError) {
-        setErrorMessage(plansError.message);
-        setLoading(false);
-        return;
+      setErrorMessage(plansError.message);
+      setLoading(false);
+      return;
     }
 
     setPlans(plansData ?? []);
-
     setLoading(false);
-    }
+  }
 
   const availableDates = useMemo(() => {
     return Array.from(
@@ -260,13 +251,21 @@ export default function PlannerPage() {
   const dayPredictions = useMemo(() => {
     return predictions
       .filter((item) => item.date === selectedDate)
-      .sort((a, b) => (b.predicted_score ?? 0) - (a.predicted_score ?? 0));
+      .sort(
+        (a, b) =>
+          (b.planning_score ?? b.predicted_score ?? 0) -
+          (a.planning_score ?? a.predicted_score ?? 0)
+      );
   }, [predictions, selectedDate]);
 
   const selectedActivityRows = useMemo(() => {
     return predictions
       .filter((item) => item.activity === selectedActivity)
-      .sort((a, b) => (b.predicted_score ?? 0) - (a.predicted_score ?? 0));
+      .sort(
+        (a, b) =>
+          (b.planning_score ?? b.predicted_score ?? 0) -
+          (a.planning_score ?? a.predicted_score ?? 0)
+      );
   }, [predictions, selectedActivity]);
 
   function planAlreadyExists(prediction: PredictionRow) {
@@ -280,6 +279,8 @@ export default function PlannerPage() {
   function buildDescription(prediction: PredictionRow, windowText: string) {
     return [
       `Predicted score: ${prediction.predicted_score ?? "N/A"} (${prediction.label ?? "No label"})`,
+      `Planning score: ${prediction.planning_score ?? "N/A"}`,
+      `Forecast confidence: ${prediction.forecast_confidence ?? "N/A"} (${prediction.forecast_confidence_label ?? "N/A"})`,
       `Recommended window: ${windowText}`,
       "",
       `Why: ${prediction.explanation ?? "No explanation available."}`,
@@ -291,9 +292,7 @@ export default function PlannerPage() {
   }
 
   function getRecommendedWindow(prediction: PredictionRow) {
-    // prediction_history currently does not store time windows.
-    // Use a simple placeholder until time window data is connected.
-    return "Suggested time TBD";
+    return prediction.recommended_window ?? "Suggested time TBD";
   }
 
   async function saveAsPlanned(prediction: PredictionRow) {
@@ -322,8 +321,11 @@ export default function PlannerPage() {
         planned_date: prediction.date,
         planned_window: windowText,
         status: "Planned",
-        location_name: "",
+        location_name: prediction.location_name ?? "",
         score_at_planning: prediction.predicted_score,
+        planning_score_at_planning: prediction.planning_score,
+        forecast_confidence_at_planning: prediction.forecast_confidence,
+        forecast_confidence_label_at_planning: prediction.forecast_confidence_label,
         species_target_at_planning: prediction.best_species,
         notes: "",
       });
@@ -342,141 +344,135 @@ export default function PlannerPage() {
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">Loading...</div>
-      </main>
-    );
-  }
+    return <p className="text-slate-300">Loading...</p>;
+    }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
-          <h1 className="text-3xl font-bold">Planner</h1>
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+        <>
+        <PageHeader title="Planner" />
+
+        <Card className="mt-6">
+            <p className="text-slate-300">
             Please log in to use the Planner.
-          </p>
-        </div>
-      </main>
+            </p>
+        </Card>
+        </>
     );
-  }
+    }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+        <PageHeader
+        title="Planner"
+        description="Use cached personalized predictions to choose a day, choose an activity, save plans, and export calendar events."
+        />
 
-        <h1 className="text-3xl font-bold">Planner</h1>
-        <p className="mt-2 text-slate-300">
-          Early planner using cached prediction history.
-        </p>
+      {loading && (
+        <p className="mt-6 text-slate-300">Loading cached predictions...</p>
+      )}
 
-        {loading && (
-          <p className="mt-6 text-slate-300">Loading cached predictions...</p>
-        )}
+      {errorMessage && (
+        <StatusMessage type="error">
+          {errorMessage}
+        </StatusMessage>
+      )}
 
-        {errorMessage && (
-          <div className="mt-6 rounded-lg bg-red-900/50 p-3 text-red-200">
-            {errorMessage}
-          </div>
-        )}
+      {planMessage && (
+        <StatusMessage type="success">
+          {planMessage}
+        </StatusMessage>
+      )}
 
-        {planMessage && (
-          <div className="mt-6 rounded-lg bg-green-900/50 p-3 text-green-200">
-            {planMessage}
-          </div>
-        )}
+      {planError && (
+        <StatusMessage type="error">
+          {planError}
+        </StatusMessage>
+      )}
 
-        {planError && (
-          <div className="mt-6 rounded-lg bg-red-900/50 p-3 text-red-200">
-            {planError}
-          </div>
-        )}
-
-        {!loading && !errorMessage && predictions.length === 0 && (
-          <div className="mt-8 rounded-2xl bg-slate-900 p-5 text-slate-300">
+      {!loading && !errorMessage && predictions.length === 0 && (
+        <Card className="mt-8">
+          <p className="text-slate-300">
             No cached predictions found yet.
-          </div>
-        )}
+          </p>
+        </Card>
+      )}
 
-        {predictions.length > 0 && (
-          <>
-            <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-              <h2 className="text-xl font-semibold">Choose a Day</h2>
+      {predictions.length > 0 && (
+        <>
+          <Card className="mt-8">
+            <h2 className="text-xl font-semibold">Choose a Day</h2>
 
-              <label className="mt-4 grid gap-1">
-                <span className="text-sm text-slate-300">Date</span>
-                <select
-                  value={selectedDate}
-                  onChange={(event) => setSelectedDate(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                >
-                  {availableDates.map((date) => (
-                    <option key={date}>{date}</option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="mt-4 grid gap-3">
-                {dayPredictions.slice(0, 5).map((prediction) => (
-                  <PredictionCard
-                    key={`${prediction.date}-${prediction.activity}`}
-                    prediction={prediction}
-                    alreadyPlanned={planAlreadyExists(prediction)}
-                    saving={savingPlanKey === `${prediction.date}-${prediction.activity}`}
-                    onSavePlan={() => saveAsPlanned(prediction)}
-                    windowText={getRecommendedWindow(prediction)}
-                    description={buildDescription(
-                      prediction,
-                      getRecommendedWindow(prediction)
-                    )}
-                  />
+            <label className="mt-4 grid gap-1">
+              <span className="text-sm text-slate-300">Date</span>
+              <select
+                value={selectedDate}
+                onChange={(event) => setSelectedDate(event.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+              >
+                {availableDates.map((date) => (
+                  <option key={date}>{date}</option>
                 ))}
-              </div>
-            </section>
+              </select>
+            </label>
 
-            <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-              <h2 className="text-xl font-semibold">Choose an Activity</h2>
+            <div className="mt-4 grid gap-3">
+              {dayPredictions.slice(0, 5).map((prediction) => (
+                <PredictionCard
+                  key={`${prediction.date}-${prediction.activity}`}
+                  prediction={prediction}
+                  alreadyPlanned={planAlreadyExists(prediction)}
+                  saving={savingPlanKey === `${prediction.date}-${prediction.activity}`}
+                  onSavePlan={() => saveAsPlanned(prediction)}
+                  windowText={getRecommendedWindow(prediction)}
+                  description={buildDescription(
+                    prediction,
+                    getRecommendedWindow(prediction)
+                  )}
+                />
+              ))}
+            </div>
+          </Card>
 
-              <label className="mt-4 grid gap-1">
-                <span className="text-sm text-slate-300">Activity</span>
-                <select
-                  value={selectedActivity}
-                  onChange={(event) =>
-                    setSelectedActivity(event.target.value)
-                  }
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                >
-                  <option value="">Choose activity</option>
-                  {availableActivities.map((activity) => (
-                    <option key={activity}>{activity}</option>
-                  ))}
-                </select>
-              </label>
+          <Card className="mt-8">
+            <h2 className="text-xl font-semibold">Choose an Activity</h2>
 
-              <div className="mt-4 grid gap-3">
-                {selectedActivityRows.slice(0, 5).map((prediction) => (
-                  <PredictionCard
-                    key={`${prediction.activity}-${prediction.date}`}
-                    prediction={prediction}
-                    alreadyPlanned={planAlreadyExists(prediction)}
-                    saving={savingPlanKey === `${prediction.date}-${prediction.activity}`}
-                    onSavePlan={() => saveAsPlanned(prediction)}
-                    windowText={getRecommendedWindow(prediction)}
-                    description={buildDescription(
-                      prediction,
-                      getRecommendedWindow(prediction)
-                    )}
-                  />
+            <label className="mt-4 grid gap-1">
+              <span className="text-sm text-slate-300">Activity</span>
+              <select
+                value={selectedActivity}
+                onChange={(event) =>
+                  setSelectedActivity(event.target.value)
+                }
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+              >
+                <option value="">Choose activity</option>
+                {availableActivities.map((activity) => (
+                  <option key={activity}>{activity}</option>
                 ))}
-              </div>
-            </section>
-          </>
-        )}
-      </div>
-    </main>
+              </select>
+            </label>
+
+            <div className="mt-4 grid gap-3">
+              {selectedActivityRows.slice(0, 5).map((prediction) => (
+                <PredictionCard
+                  key={`${prediction.activity}-${prediction.date}`}
+                  prediction={prediction}
+                  alreadyPlanned={planAlreadyExists(prediction)}
+                  saving={savingPlanKey === `${prediction.date}-${prediction.activity}`}
+                  onSavePlan={() => saveAsPlanned(prediction)}
+                  windowText={getRecommendedWindow(prediction)}
+                  description={buildDescription(
+                    prediction,
+                    getRecommendedWindow(prediction)
+                  )}
+                />
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+    </>
   );
 }
 
@@ -505,7 +501,7 @@ function PredictionCard({
     start,
     end,
     description,
-    location: "",
+    location: prediction.location_name ?? "",
   });
 
   const downloadHref = makeIcsDownloadHref(icsText);
@@ -529,18 +525,18 @@ function PredictionCard({
 
           {prediction.location_name && (
             <div className="mt-2 text-sm text-blue-300">
-                Location: {prediction.location_name}
+              Location: {prediction.location_name}
             </div>
-            )}
+          )}
 
           {prediction.planning_score != null && (
             <div className="mt-2 text-sm text-slate-300">
-                Planning score: {prediction.planning_score}
-                {prediction.forecast_confidence_label
+              Planning score: {prediction.planning_score}
+              {prediction.forecast_confidence_label
                 ? ` · ${prediction.forecast_confidence_label}`
                 : ""}
             </div>
-            )}
+          )}
 
           <div className="mt-2 text-sm text-slate-300">
             Window: {windowText}
@@ -566,15 +562,14 @@ function PredictionCard({
               {prediction.explanation}
             </p>
           )}
-        </div>
 
-        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
+          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
             <details>
-                <summary className="cursor-pointer font-semibold text-white">
+              <summary className="cursor-pointer font-semibold text-white">
                 Scoring details
-                </summary>
+              </summary>
 
-                <div className="mt-3 grid gap-1">
+              <div className="mt-3 grid gap-1">
                 <div>Rule score: {prediction.rule_score ?? "N/A"}</div>
                 <div>ML score: {prediction.ml_score ?? "N/A"}</div>
                 <div>Final score: {prediction.final_score ?? "N/A"}</div>
@@ -587,13 +582,14 @@ function PredictionCard({
                 <div>Prediction source: {prediction.prediction_source ?? "N/A"}</div>
 
                 {prediction.model_explanation && (
-                    <div className="mt-2 text-slate-400">
+                  <div className="mt-2 text-slate-400">
                     {prediction.model_explanation}
-                    </div>
+                  </div>
                 )}
-                </div>
+              </div>
             </details>
-            </div>
+          </div>
+        </div>
 
         <div className="grid gap-2">
           <div className="rounded-full bg-blue-500 px-3 py-1 text-center text-sm font-bold">

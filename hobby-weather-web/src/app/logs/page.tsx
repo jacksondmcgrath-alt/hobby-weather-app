@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
+import { ACTIVITY_OPTIONS } from "@/lib/activityMeta";
 import { trackEvent } from "@/lib/trackEvent";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type ActivityLog = {
   id: number;
@@ -21,16 +22,6 @@ type ActivityLog = {
   did_i_go: string | null;
   notes: string | null;
 };
-
-const ACTIVITY_OPTIONS = [
-  "Fishing",
-  "Camping",
-  "Running",
-  "Kayaking",
-  "Disc Golf",
-  "Tennis",
-  "Beach Day",
-];
 
 const DID_GO_OPTIONS = [
   "Yes",
@@ -111,11 +102,12 @@ export default function LogsPage() {
 
     if (error) {
       setLogsError(error.message);
+      setLogs([]);
       setLogsLoading(false);
       return;
     }
 
-    setLogs(data ?? []);
+    setLogs((data ?? []) as unknown as ActivityLog[]);
     setLogsLoading(false);
   }
 
@@ -273,289 +265,279 @@ export default function LogsPage() {
       return;
     }
 
+    await trackEvent(user.id, "activity_log_deleted", {
+      log_id: logId,
+    });
+
     await loadLogs();
 
     setWorkingLogId(null);
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <p className="text-slate-300">Loading...</p>
-        </div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
+      <>
+        <PageHeader title="Activity Logs" />
 
-          <h1 className="text-3xl font-bold">Activity Logs</h1>
-
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+        <Card className="mt-6">
+          <p className="text-slate-300">
             Please log in on the Home page to view and create activity logs.
           </p>
-        </div>
-      </main>
+        </Card>
+      </>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+      <PageHeader
+        title="Activity Logs"
+        description="Save actual experiences so the app can eventually learn your preferences."
+      />
 
-        <header>
-          <h1 className="text-3xl font-bold">Activity Logs</h1>
-          <p className="mt-2 text-slate-300">
-            Save actual experiences so the app can eventually learn your preferences.
-          </p>
-        </header>
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Add Activity Log</h2>
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Add Activity Log</h2>
-
-          <form onSubmit={handleSaveLog} className="mt-4 grid gap-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Activity</span>
-                <select
-                  value={activity}
-                  onChange={(event) => setActivity(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                >
-                  {ACTIVITY_OPTIONS.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Date</span>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(event) => setDate(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                  required
-                />
-              </label>
-            </div>
-
-            <label className="grid gap-2">
-              <span className="text-sm text-slate-300">
-                Actual enjoyment: {actualEnjoyment}/10
-              </span>
-              <input
-                type="range"
-                min={1}
-                max={10}
-                value={actualEnjoyment}
-                onChange={(event) =>
-                  setActualEnjoyment(Number(event.target.value))
-                }
-              />
-            </label>
-
+        <form onSubmit={handleSaveLog} className="mt-4 grid gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Did you go?</span>
+              <span className="text-sm text-slate-300">Activity</span>
               <select
-                value={didIGo}
-                onChange={(event) => setDidIGo(event.target.value)}
+                value={activity}
+                onChange={(event) => setActivity(event.target.value)}
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
               >
-                {DID_GO_OPTIONS.map((option) => (
+                {ACTIVITY_OPTIONS.map((option) => (
                   <option key={option}>{option}</option>
                 ))}
               </select>
             </label>
 
             <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Notes</span>
-              <textarea
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Example: Wind was worse than expected. Bugs were fine. Great run."
-                className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+              <span className="text-sm text-slate-300">Date</span>
+              <input
+                type="date"
+                value={date}
+                onChange={(event) => setDate(event.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                required
               />
             </label>
-
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving..." : "Save activity log"}
-            </button>
-          </form>
-
-          {saveMessage && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {saveMessage}
-            </div>
-          )}
-
-          {saveError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {saveError}
-            </div>
-          )}
-        </section>
-
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Your Logs</h2>
-
-          {logsLoading && (
-            <p className="mt-4 text-slate-300">Loading activity logs...</p>
-          )}
-
-          {logsError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {logsError}
-            </div>
-          )}
-
-          {editMessage && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {editMessage}
-            </div>
-          )}
-
-          {editError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {editError}
-            </div>
-          )}
-
-          {!logsLoading && !logsError && logs.length === 0 && (
-            <p className="mt-4 text-slate-300">No logs yet.</p>
-          )}
-
-          <div className="mt-4 grid gap-3">
-            {logs.map((log) => (
-              <div
-                key={log.id}
-                className="rounded-xl border border-slate-700 bg-slate-800 p-4"
-              >
-                {editingLogId === log.id ? (
-                  <div className="grid gap-4">
-                    <div className="text-lg font-semibold">
-                      Editing {log.activity ?? "Unknown activity"}
-                    </div>
-
-                    <label className="grid gap-2">
-                      <span className="text-sm text-slate-300">
-                        Actual enjoyment: {editEnjoyment}/10
-                      </span>
-                      <input
-                        type="range"
-                        min={1}
-                        max={10}
-                        value={editEnjoyment}
-                        onChange={(event) =>
-                          setEditEnjoyment(Number(event.target.value))
-                        }
-                      />
-                    </label>
-
-                    <label className="grid gap-1">
-                      <span className="text-sm text-slate-300">Did you go?</span>
-                      <select
-                        value={editDidIGo}
-                        onChange={(event) => setEditDidIGo(event.target.value)}
-                        className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                      >
-                        {DID_GO_OPTIONS.map((option) => (
-                          <option key={option}>{option}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-1">
-                      <span className="text-sm text-slate-300">Notes</span>
-                      <textarea
-                        value={editNotes}
-                        onChange={(event) => setEditNotes(event.target.value)}
-                        className="min-h-24 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                      />
-                    </label>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => saveLogEdits(log)}
-                        disabled={workingLogId === log.id}
-                        className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {workingLogId === log.id ? "Saving..." : "Save edits"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={cancelEditing}
-                        className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="text-lg font-semibold">
-                        {log.activity ?? "Unknown activity"}
-                      </div>
-
-                      <div className="mt-1 text-sm text-slate-300">
-                        {log.date ?? "Unknown date"} · {log.did_i_go ?? "Unknown"}
-                      </div>
-
-                      {log.planned_activity_id && (
-                        <div className="mt-1 text-xs text-blue-300">
-                          Linked to planned activity #{log.planned_activity_id}
-                        </div>
-                      )}
-
-                      {log.notes && (
-                        <p className="mt-3 text-sm text-slate-300">
-                          {log.notes}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <div className="rounded-full bg-blue-500 px-3 py-1 text-center text-sm font-bold">
-                        {log.actual_enjoyment_1_to_10 ?? "?"}/10
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => startEditing(log)}
-                        className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                      >
-                        Edit
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => deleteLog(log.id)}
-                        disabled={workingLogId === log.id}
-                        className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {workingLogId === log.id ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
-        </section>
-      </div>
-    </main>
+
+          <label className="grid gap-2">
+            <span className="text-sm text-slate-300">
+              Actual enjoyment: {actualEnjoyment}/10
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={10}
+              value={actualEnjoyment}
+              onChange={(event) =>
+                setActualEnjoyment(Number(event.target.value))
+              }
+            />
+          </label>
+
+          <label className="grid gap-1">
+            <span className="text-sm text-slate-300">Did you go?</span>
+            <select
+              value={didIGo}
+              onChange={(event) => setDidIGo(event.target.value)}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+            >
+              {DID_GO_OPTIONS.map((option) => (
+                <option key={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1">
+            <span className="text-sm text-slate-300">Notes</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Example: Wind was worse than expected. Bugs were fine. Great run."
+              className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save activity log"}
+          </button>
+        </form>
+
+        {saveMessage && (
+          <StatusMessage type="success">
+            {saveMessage}
+          </StatusMessage>
+        )}
+
+        {saveError && (
+          <StatusMessage type="error">
+            {saveError}
+          </StatusMessage>
+        )}
+      </Card>
+
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Your Logs</h2>
+
+        {logsLoading && (
+          <p className="mt-4 text-slate-300">Loading activity logs...</p>
+        )}
+
+        {logsError && (
+          <StatusMessage type="error">
+            {logsError}
+          </StatusMessage>
+        )}
+
+        {editMessage && (
+          <StatusMessage type="success">
+            {editMessage}
+          </StatusMessage>
+        )}
+
+        {editError && (
+          <StatusMessage type="error">
+            {editError}
+          </StatusMessage>
+        )}
+
+        {!logsLoading && !logsError && logs.length === 0 && (
+          <p className="mt-4 text-slate-300">No logs yet.</p>
+        )}
+
+        <div className="mt-4 grid gap-3">
+          {logs.map((log) => (
+            <div
+              key={log.id}
+              className="rounded-xl border border-slate-700 bg-slate-800 p-4"
+            >
+              {editingLogId === log.id ? (
+                <div className="grid gap-4">
+                  <div className="text-lg font-semibold">
+                    Editing {log.activity ?? "Unknown activity"}
+                  </div>
+
+                  <label className="grid gap-2">
+                    <span className="text-sm text-slate-300">
+                      Actual enjoyment: {editEnjoyment}/10
+                    </span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={10}
+                      value={editEnjoyment}
+                      onChange={(event) =>
+                        setEditEnjoyment(Number(event.target.value))
+                      }
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm text-slate-300">Did you go?</span>
+                    <select
+                      value={editDidIGo}
+                      onChange={(event) => setEditDidIGo(event.target.value)}
+                      className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+                    >
+                      {DID_GO_OPTIONS.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm text-slate-300">Notes</span>
+                    <textarea
+                      value={editNotes}
+                      onChange={(event) => setEditNotes(event.target.value)}
+                      className="min-h-24 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => saveLogEdits(log)}
+                      disabled={workingLogId === log.id}
+                      className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {workingLogId === log.id ? "Saving..." : "Save edits"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={cancelEditing}
+                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-lg font-semibold">
+                      {log.activity ?? "Unknown activity"}
+                    </div>
+
+                    <div className="mt-1 text-sm text-slate-300">
+                      {log.date ?? "Unknown date"} · {log.did_i_go ?? "Unknown"}
+                    </div>
+
+                    {log.planned_activity_id && (
+                      <div className="mt-1 text-xs text-blue-300">
+                        Linked to planned activity #{log.planned_activity_id}
+                      </div>
+                    )}
+
+                    {log.notes && (
+                      <p className="mt-3 text-sm text-slate-300">
+                        {log.notes}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <div className="rounded-full bg-blue-500 px-3 py-1 text-center text-sm font-bold">
+                      {log.actual_enjoyment_1_to_10 ?? "?"}/10
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => startEditing(log)}
+                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteLog(log.id)}
+                      disabled={workingLogId === log.id}
+                      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {workingLogId === log.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </>
   );
 }

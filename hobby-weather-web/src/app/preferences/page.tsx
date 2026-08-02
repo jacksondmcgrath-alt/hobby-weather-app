@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
 import { trackEvent } from "@/lib/trackEvent";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type PreferenceSettings = {
   bug_tolerance: number;
@@ -141,157 +141,149 @@ export default function PreferencesPage() {
     setSaving(false);
   }
 
-  async function resetPreferences() {
+  function resetPreferences() {
     setPreferences(DEFAULT_PREFERENCES);
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <p className="text-slate-300">Loading...</p>
-        </div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
-          <h1 className="text-3xl font-bold">Preferences</h1>
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+      <>
+        <PageHeader title="Preferences" />
+
+        <Card className="mt-6">
+          <p className="text-slate-300">
             Please log in on the Home page to manage preferences.
           </p>
-        </div>
-      </main>
+        </Card>
+      </>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+      <PageHeader
+        title="Preferences"
+        description="Tune how the app should think about your outdoor activities."
+      />
 
-        <header>
-          <h1 className="text-3xl font-bold">Preferences</h1>
-          <p className="mt-2 text-slate-300">
-            Tune how the app should think about your outdoor activities.
-          </p>
-        </header>
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Scoring Preferences</h2>
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Scoring Preferences</h2>
+        <p className="mt-2 text-sm text-slate-300">
+          These values adjust recommendations for your personal comfort and risk tolerance.
+        </p>
 
-          {loading && (
-            <p className="mt-4 text-slate-300">Loading preferences...</p>
-          )}
+        {loading && (
+          <p className="mt-4 text-slate-300">Loading preferences...</p>
+        )}
 
-          {loadError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {loadError}
-            </div>
-          )}
+        {loadError && (
+          <StatusMessage type="error">
+            {loadError}
+          </StatusMessage>
+        )}
 
-          <div className="mt-6 grid gap-6">
-            <PreferenceSlider
-              label="General bug tolerance"
-              help="0 = I hate bugs, 10 = bugs do not bother me much"
-              value={preferences.bug_tolerance}
-              onChange={(value) => updatePreference("bug_tolerance", value)}
-            />
+        <div className="mt-6 grid gap-6">
+          <PreferenceSlider
+            label="General bug tolerance"
+            help="0 = I hate bugs, 10 = bugs do not bother me much"
+            value={preferences.bug_tolerance}
+            onChange={(value) => updatePreference("bug_tolerance", value)}
+          />
 
-            <PreferenceSlider
-              label="Rain caution"
-              help="0 = rain does not bother me, 10 = avoid rain strongly"
-              value={preferences.rain_caution}
-              onChange={(value) => updatePreference("rain_caution", value)}
-            />
+          <PreferenceSlider
+            label="Rain caution"
+            help="0 = rain does not bother me, 10 = avoid rain strongly"
+            value={preferences.rain_caution}
+            onChange={(value) => updatePreference("rain_caution", value)}
+          />
 
-            <PreferenceSlider
-              label="Fishing insect activity importance"
-              help="Higher means bug/insect activity helps fishing more"
-              value={preferences.fishing_bug_boost}
-              onChange={(value) => updatePreference("fishing_bug_boost", value)}
-            />
+          <PreferenceSlider
+            label="Fishing insect activity importance"
+            help="Higher means bug/insect activity helps fishing more"
+            value={preferences.fishing_bug_boost}
+            onChange={(value) => updatePreference("fishing_bug_boost", value)}
+          />
 
-            <PreferenceSlider
-              label="Fishing wind tolerance"
-              help="Higher means you are more okay with wind while fishing"
-              value={preferences.fishing_wind_tolerance}
-              onChange={(value) => updatePreference("fishing_wind_tolerance", value)}
-            />
+          <PreferenceSlider
+            label="Fishing wind tolerance"
+            help="Higher means you are more okay with wind while fishing"
+            value={preferences.fishing_wind_tolerance}
+            onChange={(value) => updatePreference("fishing_wind_tolerance", value)}
+          />
 
-            <PreferenceSlider
-              label="Camping bug sensitivity"
-              help="Higher means bugs hurt camping scores more"
-              value={preferences.camping_bug_sensitivity}
-              onChange={(value) => updatePreference("camping_bug_sensitivity", value)}
-            />
+          <PreferenceSlider
+            label="Camping bug sensitivity"
+            help="Higher means bugs hurt camping scores more"
+            value={preferences.camping_bug_sensitivity}
+            onChange={(value) => updatePreference("camping_bug_sensitivity", value)}
+          />
 
-            <PreferenceSlider
-              label="Running wind sensitivity"
-              help="Higher means wind hurts running scores more"
-              value={preferences.running_wind_sensitivity}
-              onChange={(value) => updatePreference("running_wind_sensitivity", value)}
-            />
+          <PreferenceSlider
+            label="Running wind sensitivity"
+            help="Higher means wind hurts running scores more"
+            value={preferences.running_wind_sensitivity}
+            onChange={(value) => updatePreference("running_wind_sensitivity", value)}
+          />
 
-            <PreferenceSlider
-              label="Running heat sensitivity"
-              help="Higher means warm weather hurts running scores more"
-              value={preferences.running_heat_sensitivity}
-              onChange={(value) => updatePreference("running_heat_sensitivity", value)}
-            />
+          <PreferenceSlider
+            label="Running heat sensitivity"
+            help="Higher means warm weather hurts running scores more"
+            value={preferences.running_heat_sensitivity}
+            onChange={(value) => updatePreference("running_heat_sensitivity", value)}
+          />
 
-            <PreferenceSlider
-              label="Kayaking wind caution"
-              help="Higher means wind/gusts hurt kayaking scores more"
-              value={preferences.kayaking_wind_caution}
-              onChange={(value) => updatePreference("kayaking_wind_caution", value)}
-            />
+          <PreferenceSlider
+            label="Kayaking wind caution"
+            help="Higher means wind/gusts hurt kayaking scores more"
+            value={preferences.kayaking_wind_caution}
+            onChange={(value) => updatePreference("kayaking_wind_caution", value)}
+          />
 
-            <PreferenceSlider
-              label="Disc golf wind sensitivity"
-              help="Higher means wind hurts disc golf scores more"
-              value={preferences.disc_golf_wind_sensitivity}
-              onChange={(value) => updatePreference("disc_golf_wind_sensitivity", value)}
-            />
-          </div>
+          <PreferenceSlider
+            label="Disc golf wind sensitivity"
+            help="Higher means wind hurts disc golf scores more"
+            value={preferences.disc_golf_wind_sensitivity}
+            onChange={(value) => updatePreference("disc_golf_wind_sensitivity", value)}
+          />
+        </div>
 
-          <div className="mt-8 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={savePreferences}
-              disabled={saving}
-              className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving..." : "Save preferences"}
-            </button>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={savePreferences}
+            disabled={saving}
+            className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save preferences"}
+          </button>
 
-            <button
-              type="button"
-              onClick={resetPreferences}
-              className="rounded-lg bg-slate-700 px-4 py-2 font-semibold text-white hover:bg-slate-600"
-            >
-              Reset to defaults
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={resetPreferences}
+            className="rounded-lg bg-slate-700 px-4 py-2 font-semibold text-white hover:bg-slate-600"
+          >
+            Reset to defaults
+          </button>
+        </div>
 
-          {saveMessage && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {saveMessage}
-            </div>
-          )}
+        {saveMessage && (
+          <StatusMessage type="success">
+            {saveMessage}
+          </StatusMessage>
+        )}
 
-          {saveError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {saveError}
-            </div>
-          )}
-        </section>
-      </div>
-    </main>
+        {saveError && (
+          <StatusMessage type="error">
+            {saveError}
+          </StatusMessage>
+        )}
+      </Card>
+    </>
   );
 }
 

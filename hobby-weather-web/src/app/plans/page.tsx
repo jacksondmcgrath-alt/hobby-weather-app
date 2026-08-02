@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
 import { ACTIVITY_OPTIONS, PLAN_STATUS_OPTIONS } from "@/lib/activityMeta";
 import { trackEvent } from "@/lib/trackEvent";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type PlannedActivity = {
   id: number;
@@ -124,7 +124,7 @@ export default function PlansPage() {
       return;
     }
 
-    setPlans(plansData ?? []);
+    setPlans((plansData ?? []) as unknown as PlannedActivity[]);
 
     const { data: logsData, error: logsError } = await supabase
       .from("activity_logs")
@@ -140,7 +140,9 @@ export default function PlansPage() {
 
     const linkedIds = new Set<number>();
 
-    ((logsData ?? []) as ActivityLog[]).forEach((log) => {
+    const typedLogsData = (logsData ?? []) as unknown as ActivityLog[];
+
+    typedLogsData.forEach((log) => {
       if (log.planned_activity_id !== null) {
         linkedIds.add(log.planned_activity_id);
       }
@@ -433,326 +435,254 @@ export default function PlansPage() {
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <p className="text-slate-300">Loading...</p>
-        </div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
-          <h1 className="text-3xl font-bold">Plans</h1>
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+      <>
+        <PageHeader title="Plans" />
+
+        <Card className="mt-6">
+          <p className="text-slate-300">
             Please log in on the Home page to view and create plans.
           </p>
-        </div>
-      </main>
+        </Card>
+      </>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+      <PageHeader
+        title="Plans"
+        description="Save activities you might do, then later log how they actually went."
+      />
 
-        <header>
-          <h1 className="text-3xl font-bold">Plans</h1>
-          <p className="mt-2 text-slate-300">
-            Save activities you might do, then later log how they actually went.
-          </p>
-        </header>
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Create Plan</h2>
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Create Plan</h2>
+        <form onSubmit={handleSavePlan} className="mt-4 grid gap-4">
+          <PlanFormFields
+            activity={activity}
+            setActivity={setActivity}
+            plannedDate={plannedDate}
+            setPlannedDate={setPlannedDate}
+            plannedWindow={plannedWindow}
+            setPlannedWindow={setPlannedWindow}
+            status={status}
+            setStatus={setStatus}
+            locationName={locationName}
+            setLocationName={setLocationName}
+            notes={notes}
+            setNotes={setNotes}
+          />
 
-          <form onSubmit={handleSavePlan} className="mt-4 grid gap-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Activity</span>
-                <select
-                  value={activity}
-                  onChange={(event) => setActivity(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                >
-                  {ACTIVITY_OPTIONS.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save plan"}
+          </button>
+        </form>
 
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Date</span>
-                <input
-                  type="date"
-                  value={plannedDate}
-                  onChange={(event) => setPlannedDate(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                  required
-                />
-              </label>
-            </div>
+        {saveMessage && (
+          <StatusMessage type="success">
+            {saveMessage}
+          </StatusMessage>
+        )}
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">
-                  Planned window
-                </span>
-                <input
-                  type="text"
-                  value={plannedWindow}
-                  onChange={(event) => setPlannedWindow(event.target.value)}
-                  placeholder="Example: 6:00 PM–8:00 PM"
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                />
-              </label>
+        {saveError && (
+          <StatusMessage type="error">
+            {saveError}
+          </StatusMessage>
+        )}
+      </Card>
 
-              <label className="grid gap-1">
-                <span className="text-sm text-slate-300">Status</span>
-                <select
-                  value={status}
-                  onChange={(event) => setStatus(event.target.value)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-                >
-                  {PLAN_STATUS_OPTIONS.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Your Plans</h2>
 
-            <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Location name</span>
-              <input
-                type="text"
-                value={locationName}
-                onChange={(event) => setLocationName(event.target.value)}
-                placeholder="Example: Local Pond, Tennis Courts"
-                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-              />
-            </label>
+        {loading && (
+          <p className="mt-4 text-slate-300">Loading plans...</p>
+        )}
 
-            <label className="grid gap-1">
-              <span className="text-sm text-slate-300">Notes</span>
-              <textarea
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Optional notes"
-                className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-              />
-            </label>
+        {loadError && (
+          <StatusMessage type="error">
+            {loadError}
+          </StatusMessage>
+        )}
 
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving..." : "Save plan"}
-            </button>
-          </form>
+        {actionMessage && (
+          <StatusMessage type="success">
+            {actionMessage}
+          </StatusMessage>
+        )}
 
-          {saveMessage && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {saveMessage}
-            </div>
-          )}
+        {actionError && (
+          <StatusMessage type="error">
+            {actionError}
+          </StatusMessage>
+        )}
 
-          {saveError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {saveError}
-            </div>
-          )}
-        </section>
+        {!loading && !loadError && plans.length === 0 && (
+          <p className="mt-4 text-slate-300">No plans yet.</p>
+        )}
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Your Plans</h2>
+        <div className="mt-4 grid gap-3">
+          {plans.map((plan) => {
+            const alreadyLogged = loggedPlanIds.has(plan.id);
 
-          {loading && (
-            <p className="mt-4 text-slate-300">Loading plans...</p>
-          )}
+            return (
+              <div
+                key={plan.id}
+                className="rounded-xl border border-slate-700 bg-slate-800 p-4"
+              >
+                {editingPlanId === plan.id ? (
+                  <div className="grid gap-4">
+                    <div className="text-lg font-semibold">
+                      Editing plan
+                    </div>
 
-          {loadError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {loadError}
-            </div>
-          )}
+                    <PlanFormFields
+                      activity={editActivity}
+                      setActivity={setEditActivity}
+                      plannedDate={editPlannedDate}
+                      setPlannedDate={setEditPlannedDate}
+                      plannedWindow={editPlannedWindow}
+                      setPlannedWindow={setEditPlannedWindow}
+                      status={editStatus}
+                      setStatus={setEditStatus}
+                      locationName={editLocationName}
+                      setLocationName={setEditLocationName}
+                      notes={editNotes}
+                      setNotes={setEditNotes}
+                    />
 
-          {actionMessage && (
-            <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
-              {actionMessage}
-            </div>
-          )}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => savePlanEdits(plan.id)}
+                        disabled={updatingId === plan.id}
+                        className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {updatingId === plan.id ? "Saving..." : "Save edits"}
+                      </button>
 
-          {actionError && (
-            <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
-              {actionError}
-            </div>
-          )}
+                      <button
+                        type="button"
+                        onClick={cancelEditing}
+                        className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="text-lg font-semibold">
+                          {plan.activity ?? "Unknown activity"}
+                        </div>
 
-          {!loading && !loadError && plans.length === 0 && (
-            <p className="mt-4 text-slate-300">No plans yet.</p>
-          )}
+                        <div className="mt-1 text-sm text-slate-300">
+                          {plan.planned_date ?? "Unknown date"} ·{" "}
+                          {plan.planned_window || "No window"} ·{" "}
+                          {plan.status ?? "Unknown status"}
+                        </div>
 
-          <div className="mt-4 grid gap-3">
-            {plans.map((plan) => {
-              const alreadyLogged = loggedPlanIds.has(plan.id);
+                        {alreadyLogged && (
+                          <div className="mt-2 inline-flex rounded-full bg-green-600 px-3 py-1 text-xs font-bold text-white">
+                            Already logged
+                          </div>
+                        )}
 
-              return (
-                <div
-                  key={plan.id}
-                  className="rounded-xl border border-slate-700 bg-slate-800 p-4"
-                >
-                  {editingPlanId === plan.id ? (
-                    <div className="grid gap-4">
-                      <div className="text-lg font-semibold">
-                        Editing plan
+                        {plan.location_name && (
+                          <div className="mt-2 text-sm text-slate-400">
+                            Location: {plan.location_name}
+                          </div>
+                        )}
+
+                        {plan.species_target_at_planning && (
+                          <div className="mt-1 text-sm text-slate-400">
+                            Fishing target: {plan.species_target_at_planning}
+                          </div>
+                        )}
+
+                        {plan.notes && (
+                          <p className="mt-2 text-sm text-slate-300">
+                            {plan.notes}
+                          </p>
+                        )}
                       </div>
 
-                      <PlanFormFields
-                        activity={editActivity}
-                        setActivity={setEditActivity}
-                        plannedDate={editPlannedDate}
-                        setPlannedDate={setEditPlannedDate}
-                        plannedWindow={editPlannedWindow}
-                        setPlannedWindow={setEditPlannedWindow}
-                        status={editStatus}
-                        setStatus={setEditStatus}
-                        locationName={editLocationName}
-                        setLocationName={setEditLocationName}
-                        notes={editNotes}
-                        setNotes={setEditNotes}
-                      />
+                      <div className="grid gap-2">
+                        <select
+                          value={plan.status ?? "Planned"}
+                          onChange={(event) =>
+                            updatePlanStatus(plan.id, event.target.value)
+                          }
+                          disabled={updatingId === plan.id}
+                          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-400"
+                        >
+                          {PLAN_STATUS_OPTIONS.map((option) => (
+                            <option key={option}>{option}</option>
+                          ))}
+                        </select>
 
-                      <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => savePlanEdits(plan.id)}
-                          disabled={updatingId === plan.id}
-                          className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={() => startEditing(plan)}
+                          className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
                         >
-                          {updatingId === plan.id ? "Saving..." : "Save edits"}
+                          Edit
                         </button>
 
                         <button
                           type="button"
-                          onClick={cancelEditing}
-                          className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                          onClick={() => startLogPlan(plan.id)}
+                          disabled={alreadyLogged}
+                          className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Cancel
+                          {alreadyLogged ? "Logged" : "Log this plan"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => deletePlan(plan.id)}
+                          disabled={updatingId === plan.id}
+                          className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {updatingId === plan.id ? "Working..." : "Delete"}
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <>
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="text-lg font-semibold">
-                            {plan.activity ?? "Unknown activity"}
-                          </div>
 
-                          <div className="mt-1 text-sm text-slate-300">
-                            {plan.planned_date ?? "Unknown date"} ·{" "}
-                            {plan.planned_window || "No window"} ·{" "}
-                            {plan.status ?? "Unknown status"}
-                          </div>
-
-                          {alreadyLogged && (
-                            <div className="mt-2 inline-flex rounded-full bg-green-600 px-3 py-1 text-xs font-bold text-white">
-                              Already logged
-                            </div>
-                          )}
-
-                          {plan.location_name && (
-                            <div className="mt-2 text-sm text-slate-400">
-                              Location: {plan.location_name}
-                            </div>
-                          )}
-
-                          {plan.species_target_at_planning && (
-                            <div className="mt-1 text-sm text-slate-400">
-                              Fishing target: {plan.species_target_at_planning}
-                            </div>
-                          )}
-
-                          {plan.notes && (
-                            <p className="mt-2 text-sm text-slate-300">
-                              {plan.notes}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="grid gap-2">
-                          <select
-                            value={plan.status ?? "Planned"}
-                            onChange={(event) =>
-                              updatePlanStatus(plan.id, event.target.value)
-                            }
-                            disabled={updatingId === plan.id}
-                            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-400"
-                          >
-                            {PLAN_STATUS_OPTIONS.map((option) => (
-                              <option key={option}>{option}</option>
-                            ))}
-                          </select>
-
-                          <button
-                            type="button"
-                            onClick={() => startEditing(plan)}
-                            className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => startLogPlan(plan.id)}
-                            disabled={alreadyLogged}
-                            className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {alreadyLogged ? "Logged" : "Log this plan"}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => deletePlan(plan.id)}
-                            disabled={updatingId === plan.id}
-                            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {updatingId === plan.id ? "Working..." : "Delete"}
-                          </button>
-                        </div>
-                      </div>
-
-                      {logPlanId === plan.id && (
-                        <LogPlanForm
-                          planId={plan.id}
-                          logEnjoyment={logEnjoyment}
-                          setLogEnjoyment={setLogEnjoyment}
-                          logDidIGo={logDidIGo}
-                          setLogDidIGo={setLogDidIGo}
-                          logActualTime={logActualTime}
-                          setLogActualTime={setLogActualTime}
-                          logNotes={logNotes}
-                          setLogNotes={setLogNotes}
-                          updatingId={updatingId}
-                          onSave={() => saveLogFromPlan(plan)}
-                          onCancel={cancelLogPlan}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-    </main>
+                    {logPlanId === plan.id && (
+                      <LogPlanForm
+                        planId={plan.id}
+                        logEnjoyment={logEnjoyment}
+                        setLogEnjoyment={setLogEnjoyment}
+                        logDidIGo={logDidIGo}
+                        setLogDidIGo={setLogDidIGo}
+                        logActualTime={logActualTime}
+                        setLogActualTime={setLogActualTime}
+                        logNotes={logNotes}
+                        setLogNotes={setLogNotes}
+                        updatingId={updatingId}
+                        onSave={() => saveLogFromPlan(plan)}
+                        onCancel={cancelLogPlan}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </>
   );
 }
 
@@ -805,6 +735,7 @@ function PlanFormFields({
             type="date"
             value={plannedDate}
             onChange={(event) => setPlannedDate(event.target.value)}
+            required
             className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
           />
         </label>

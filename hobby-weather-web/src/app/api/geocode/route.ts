@@ -7,30 +7,53 @@ type GeocodeResult = {
   source: string;
 };
 
+type NominatimItem = {
+  display_name?: string;
+  lat?: string;
+  lon?: string;
+};
+
+function isValidCoordinate(latitude: number, longitude: number) {
+  return (
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+}
+
 function extractCoordinatesFromText(text: string): GeocodeResult | null {
-  const atMatch = text.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  const coordinatePattern = "(-?\\d+(?:\\.\\d+)?)";
+
+  const atMatch = text.match(
+    new RegExp(`@${coordinatePattern},${coordinatePattern}`)
+  );
 
   if (atMatch) {
-    return {
-      label: "Coordinates from map link",
-      latitude: Number(atMatch[1]),
-      longitude: Number(atMatch[2]),
-      source: "Coordinates",
-    };
+    const latitude = Number(atMatch[1]);
+    const longitude = Number(atMatch[2]);
+
+    if (isValidCoordinate(latitude, longitude)) {
+      return {
+        label: "Coordinates from map link",
+        latitude,
+        longitude,
+        source: "Coordinates",
+      };
+    }
   }
 
-  const plainMatch = text.match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
+  const plainMatch = text.match(
+    new RegExp(`${coordinatePattern}\\s*,\\s*${coordinatePattern}`)
+  );
 
   if (plainMatch) {
     const latitude = Number(plainMatch[1]);
     const longitude = Number(plainMatch[2]);
 
-    if (
-      latitude >= -90 &&
-      latitude <= 90 &&
-      longitude >= -180 &&
-      longitude <= 180
-    ) {
+    if (isValidCoordinate(latitude, longitude)) {
       return {
         label: "Coordinates from text",
         latitude,
@@ -61,14 +84,25 @@ async function searchNominatim(query: string): Promise<GeocodeResult[]> {
     throw new Error(`Nominatim error: ${response.status}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as NominatimItem[];
 
-  return data.map((item: any) => ({
-    label: item.display_name ?? "Unknown location",
-    latitude: Number(item.lat),
-    longitude: Number(item.lon),
-    source: "OpenStreetMap",
-  }));
+  return data
+    .map((item) => {
+      const latitude = Number(item.lat);
+      const longitude = Number(item.lon);
+
+      if (!isValidCoordinate(latitude, longitude)) {
+        return null;
+      }
+
+      return {
+        label: item.display_name ?? "Unknown location",
+        latitude,
+        longitude,
+        source: "OpenStreetMap",
+      };
+    })
+    .filter((item): item is GeocodeResult => item !== null);
 }
 
 export async function GET(request: NextRequest) {

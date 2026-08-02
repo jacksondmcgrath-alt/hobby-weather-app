@@ -7,13 +7,13 @@ export async function trackEvent(
 ) {
   if (!userId) return;
 
-  try {
-    await supabase.from("app_events").insert({
-      user_id: userId,
-      event_name: eventName,
-      event_data: eventData,
-    });
-  } catch (error) {
-    console.error("Could not track event:", error);
+  const { error } = await supabase.from("app_events").insert({
+    user_id: userId,
+    event_name: eventName,
+    event_data: eventData,
+  });
+
+  if (error) {
+    console.error("Could not track event:", error.message);
   }
 }

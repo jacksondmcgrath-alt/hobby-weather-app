@@ -13,36 +13,55 @@ function cleanFilename(text: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function formatIcsDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
+function formatIcsDateUtc(date: Date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  const seconds = String(date.getUTCSeconds()).padStart(2, "0");
 
-  return `${year}${month}${day}T${hours}${minutes}${seconds}`;
+  return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
 }
 
-export function parseWindowToDates(dateString: string, windowString?: string | null) {
-  const baseDate = new Date(`${dateString}T12:00:00`);
+function fallbackWindow(dateString: string) {
+  const start = new Date(`${dateString}T12:00:00`);
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
 
-  if (!windowString || windowString.includes("Not available") || windowString.includes("Full-day")) {
-    const endDate = new Date(baseDate.getTime() + 60 * 60 * 1000);
-    return { start: baseDate, end: endDate };
+  return { start, end };
+}
+
+export function parseWindowToDates(
+  dateString: string,
+  windowString?: string | null
+) {
+  if (
+    !windowString ||
+    windowString.includes("Not available") ||
+    windowString.includes("Full-day") ||
+    windowString.includes("TBD")
+  ) {
+    return fallbackWindow(dateString);
   }
 
-  const normalized = windowString.replace("—", "–").replace("-", "–");
+  const normalized = windowString
+    .replace(/—/g, "–")
+    .replace(/ - /g, "–")
+    .replace(/-/g, "–");
+
   const parts = normalized.split("–").map((part) => part.trim());
 
   if (parts.length !== 2) {
-    const endDate = new Date(baseDate.getTime() + 60 * 60 * 1000);
-    return { start: baseDate, end: endDate };
+    return fallbackWindow(dateString);
   }
 
   function parseTime(timeText: string) {
     const date = new Date(`${dateString} ${timeText}`);
-    if (Number.isNaN(date.getTime())) return null;
+
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+
     return date;
   }
 
@@ -50,8 +69,7 @@ export function parseWindowToDates(dateString: string, windowString?: string | n
   const end = parseTime(parts[1]);
 
   if (!start || !end) {
-    const endDate = new Date(baseDate.getTime() + 60 * 60 * 1000);
-    return { start: baseDate, end: endDate };
+    return fallbackWindow(dateString);
   }
 
   if (end <= start) {
@@ -75,23 +93,28 @@ export function createIcsEvent({
   location?: string;
 }) {
   const now = new Date();
-  const uid = `${now.getTime()}-${Math.random().toString(36).slice(2)}@hobby-weather-app`;
+  const uid = `${now.getTime()}-${Math.random()
+    .toString(36)
+    .slice(2)}@hobby-weather-app`;
 
-  return `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Hobby Weather Planner//EN
-CALSCALE:GREGORIAN
-BEGIN:VEVENT
-UID:${uid}
-DTSTAMP:${formatIcsDate(now)}
-DTSTART:${formatIcsDate(start)}
-DTEND:${formatIcsDate(end)}
-SUMMARY:${escapeIcsText(title)}
-DESCRIPTION:${escapeIcsText(description)}
-LOCATION:${escapeIcsText(location ?? "")}
-END:VEVENT
-END:VCALENDAR
-`;
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Hobby Weather Planner//EN",
+    "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${formatIcsDateUtc(now)}`,
+    `DTSTART:${formatIcsDateUtc(start)}`,
+    `DTEND:${formatIcsDateUtc(end)}`,
+    `SUMMARY:${escapeIcsText(title)}`,
+    `DESCRIPTION:${escapeIcsText(description)}`,
+    `LOCATION:${escapeIcsText(location ?? "")}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ];
+
+  return `${lines.join("\r\n")}\r\n`;
 }
 
 export function makeIcsDownloadHref(icsText: string) {

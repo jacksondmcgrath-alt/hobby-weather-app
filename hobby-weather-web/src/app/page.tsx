@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
 import { activityLabel } from "@/lib/activityMeta";
 import {
   calendarFilename,
@@ -271,7 +270,9 @@ export default function Home() {
       throw fallbackPredictionError;
     }
 
-    const sortedFallback = (fallbackPredictionData ?? []).sort(
+    const fallbackRows = (fallbackPredictionData ?? []) as unknown as PredictionRow[];
+
+    const sortedFallback = fallbackRows.sort(
       (a, b) => (b.predicted_score ?? 0) - (a.predicted_score ?? 0)
     );
 
@@ -426,19 +427,12 @@ export default function Home() {
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-5xl">
-          <p className="text-slate-300">Loading...</p>
-        </div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-4xl">
           <header>
             <h1 className="text-3xl font-bold">
               🌤️ Hobby Weather Planner
@@ -539,7 +533,7 @@ export default function Home() {
             )}
           </section>
         </div>
-      </main>
+    
     );
   }
 
@@ -549,11 +543,8 @@ export default function Home() {
   );
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-5xl">
-        <NavBar />
-
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold">
               Welcome back
@@ -920,8 +911,8 @@ export default function Home() {
             <QuickAction href="/preferences" label="Edit preferences" />
           </div>
         </section>
-      </div>
-    </main>
+      </>
+  
   );
 }
 

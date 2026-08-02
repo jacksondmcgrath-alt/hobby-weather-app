@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
-import { NavBar } from "@/components/NavBar";
+import { PageHeader, Card, StatusMessage } from "@/components/ui";
 
 type ExportTableName =
   | "saved_locations"
@@ -401,99 +401,91 @@ export default function ExportsPage() {
   }
 
   if (authLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">Loading...</div>
-      </main>
-    );
+    return <p className="text-slate-300">Loading...</p>;
   }
 
   if (!user) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-6 text-white">
-        <div className="mx-auto max-w-4xl">
-          <NavBar />
-          <h1 className="text-3xl font-bold">Data Exports</h1>
-          <p className="mt-4 rounded-xl bg-slate-900 p-4 text-slate-300">
+  return (
+        <>
+        <PageHeader title="Data Exports" />
+
+        <Card className="mt-6">
+            <p className="text-slate-300">
             Please log in to export your data.
-          </p>
-        </div>
-      </main>
+            </p>
+        </Card>
+        </>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-white">
-      <div className="mx-auto max-w-4xl">
-        <NavBar />
+    <>
+        <PageHeader
+        title="Data Exports"
+        description="Download your saved app data and ML-ready datasets."
+      />
 
-        <h1 className="text-3xl font-bold">Data Exports</h1>
-        <p className="mt-2 text-slate-300">
-          Download your saved app data and ML-ready datasets.
+      {message && (
+        <StatusMessage type="success">
+          {message}
+        </StatusMessage>
+      )}
+
+      {errorMessage && (
+        <StatusMessage type="error">
+          {errorMessage}
+        </StatusMessage>
+      )}
+
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">ML Training Exports</h2>
+
+        <p className="mt-2 text-sm text-slate-300">
+          These exports are structured for future modeling experiments.
         </p>
 
-        {message && (
-          <div className="mt-6 rounded-lg bg-green-900/50 p-3 text-green-200">
-            {message}
-          </div>
-        )}
+        <div className="mt-4 grid gap-3">
+          <ExportButton
+            label="Scenario ML Dataset"
+            loadingLabel={loadingLabel}
+            onClick={exportScenarioMlDataset}
+          />
 
-        {errorMessage && (
-          <div className="mt-6 rounded-lg bg-red-900/50 p-3 text-red-200">
-            {errorMessage}
-          </div>
-        )}
+          <ExportButton
+            label="Activity Log ML Dataset"
+            loadingLabel={loadingLabel}
+            onClick={exportActivityLogMlDataset}
+          />
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">ML Training Exports</h2>
+          <ExportButton
+            label="User Prediction Dataset"
+            loadingLabel={loadingLabel}
+            onClick={exportUserPredictionMlDataset}
+          />
 
-          <p className="mt-2 text-sm text-slate-300">
-            These exports are structured for future modeling experiments.
-          </p>
+          <ExportButton
+            label="Combined ML Dataset"
+            loadingLabel={loadingLabel}
+            onClick={exportCombinedMlDataset}
+          />
+        </div>
+      </Card>
 
-          <div className="mt-4 grid gap-3">
+      <Card className="mt-8">
+        <h2 className="text-xl font-semibold">Raw Table Exports</h2>
+
+        <div className="mt-4 grid gap-3">
+          {RAW_EXPORT_TABLES.map((item) => (
             <ExportButton
-              label="Scenario ML Dataset"
+              key={item.table}
+              label={item.label}
               loadingLabel={loadingLabel}
-              onClick={exportScenarioMlDataset}
+              onClick={() => exportRawTable(item.table, item.label)}
             />
-
-            <ExportButton
-              label="Activity Log ML Dataset"
-              loadingLabel={loadingLabel}
-              onClick={exportActivityLogMlDataset}
-            />
-
-            <ExportButton
-              label="User Prediction Dataset"
-              loadingLabel={loadingLabel}
-              onClick={exportUserPredictionMlDataset}
-            />
-
-            <ExportButton
-              label="Combined ML Dataset"
-              loadingLabel={loadingLabel}
-              onClick={exportCombinedMlDataset}
-            />
-          </div>
-        </section>
-
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Raw Table Exports</h2>
-
-          <div className="mt-4 grid gap-3">
-            {RAW_EXPORT_TABLES.map((item) => (
-              <ExportButton
-                key={item.table}
-                label={item.label}
-                loadingLabel={loadingLabel}
-                onClick={() => exportRawTable(item.table, item.label)}
-              />
-            ))}
-          </div>
-        </section>
-      </div>
-    </main>
+          ))}
+        </div>
+      </Card>
+    </>
   );
 }
 

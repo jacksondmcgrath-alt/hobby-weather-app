@@ -20,6 +20,7 @@ export const ACTIVITY_ICONS: Record<string, string> = {
 
 export function activityLabel(activity: string | null | undefined) {
   if (!activity) return "⭐ Unknown";
+
   return `${ACTIVITY_ICONS[activity] ?? "⭐"} ${activity}`;
 }
 
