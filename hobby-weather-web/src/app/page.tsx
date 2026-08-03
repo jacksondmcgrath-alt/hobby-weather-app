@@ -13,6 +13,24 @@ import {
 } from "@/lib/calendar";
 import { trackEvent } from "@/lib/trackEvent";
 import type { User } from "@supabase/supabase-js";
+import {
+  getFallbackDisplayName,
+  getOrCreateProfile,
+  type UserProfile,
+} from "@/lib/profile";
+import {
+  Card,
+  Button,
+  StatusMessage,
+  ScoreBadge,
+  WeatherStat,
+  StatCard,
+  EmptyState,
+  SectionTitle,
+  Badge,
+  Panel,
+} from "@/components/ui";
+
 
 type DashboardCounts = {
   savedLocations: number;
@@ -80,6 +98,8 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [signupName, setSignupName] = useState("");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
@@ -107,12 +127,29 @@ export default function Home() {
   const [latestPipelineRun, setLatestPipelineRun] = useState<PipelineRun | null>(null);
 
   useEffect(() => {
-    if (!user) {
-      return;
+  if (!user) {
+    setProfile(null);
+    return;
+  }
+
+  const currentUser = user;
+
+  async function loadUserHome() {
+    try {
+      const loadedProfile = await getOrCreateProfile(currentUser);
+      setProfile(loadedProfile);
+    } catch (error) {
+      console.error("Could not load profile:", error);
+      setProfile(null);
     }
 
-    loadDashboard(user);
+    await loadDashboard(currentUser);
+  }
+
+    loadUserHome();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
   async function handleGoogleLogin() {
     setAuthMessage("");
     setAuthError("");
@@ -147,14 +184,27 @@ export default function Home() {
 
       setAuthMessage("Logged in successfully.");
     } else {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            display_name: signupName.trim(),
+          },
+        },
       });
 
       if (error) {
         setAuthError(error.message);
         return;
+      }
+
+      if (data.user && signupName.trim()) {
+        try {
+          await getOrCreateProfile(data.user, signupName);
+        } catch (profileError) {
+          console.error("Could not create profile:", profileError);
+        }
       }
 
       setAuthMessage(
@@ -490,6 +540,19 @@ export default function Home() {
             </div>
 
             <form onSubmit={handleAuthSubmit} className="mt-4 grid gap-4">
+              {authMode === "signup" && (
+                <label className="grid gap-1">
+                  <span className="text-sm text-slate-300">Name</span>
+                  <input
+                    type="text"
+                    value={signupName}
+                    onChange={(event) => setSignupName(event.target.value)}
+                    placeholder="What should Hobby Weather call you?"
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                    required
+                  />
+                </label>
+              )}
               <label className="grid gap-1">
                 <span className="text-sm text-slate-300">Email</span>
                 <input
@@ -542,115 +605,145 @@ export default function Home() {
     1
   );
 
+  const displayName =
+    profile?.display_name?.trim() || getFallbackDisplayName(user);
+
+  const greeting = getGreeting();
+
+  const setupItems = [
+    counts.savedLocations > 0,
+    counts.activityLogs > 0,
+    counts.plannedActivities > 0,
+    counts.scenarioRatings >= 5,
+    counts.activityDefaults > 0,
+    counts.weeklyObligations > 0,
+  ];
+
+  const setupCompleteCount = setupItems.filter(Boolean).length;
+  const setupTotalCount = setupItems.length;
+
+  const recommendationDateLabel = topRecommendation?.date
+    ? formatFriendlyDate(topRecommendation.date)
+    : "an upcoming day";
+
   return (
     <>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">
-              Welcome back
-            </h1>
-
-            <p className="mt-2 text-slate-300">
-              {user.email}
-            </p>
+        <div>
+          <div className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-sky-300">
+            Your outdoor forecast assistant
           </div>
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="rounded-lg bg-slate-700 px-4 py-2 font-semibold text-white hover:bg-slate-600"
-          >
-            Log out
-          </button>
-        </header>
+          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            {greeting}, {displayName}
+          </h1>
 
-        {dashboardError && (
-          <div className="mt-6 rounded-lg bg-red-900/50 p-3 text-red-200">
-            {dashboardError}
-          </div>
-        )}
+          <p className="mt-2 max-w-3xl text-slate-300">
+            Here’s what Hobby Weather thinks is worth your attention next.
+          </p>
+        </div>
 
-        {loadingDashboard && (
-          <p className="mt-6 text-slate-300">Loading dashboard...</p>
-        )}
+        <Button onClick={handleLogout} variant="secondary">
+          Log out
+        </Button>
+      </header>
 
-        <section className="mt-8 grid gap-4 sm:grid-cols-4">
-          <DashboardCard
-            label="Saved Locations"
-            value={counts.savedLocations}
-            href="/locations"
-          />
+      {dashboardError && (
+        <StatusMessage type="error">
+          {dashboardError}
+        </StatusMessage>
+      )}
 
-          <DashboardCard
-            label="Activity Logs"
-            value={counts.activityLogs}
-            href="/logs"
-          />
+      {loadingDashboard && (
+        <p className="mt-6 text-slate-300">Loading your dashboard...</p>
+      )}
 
-          <DashboardCard
-            label="Plans"
-            value={counts.plannedActivities}
-            href="/plans"
-          />
+      <section className="mt-8">
+        {topRecommendation ? (
+          <Card className="relative overflow-hidden">
+            <div className="pointer-events-none absolute right-[-6rem] top-[-6rem] h-64 w-64 rounded-full bg-[rgb(var(--season-rgb)_/_0.14)] blur-3xl" />
 
-          <DashboardCard
-            label="Scenario Ratings"
-            value={counts.scenarioRatings}
-            href="/scenarios"
-          />
-        </section>
-
-        {topRecommendation && (
-          <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Top Upcoming Recommendation</h2>
-
-                <div className="mt-3 text-2xl font-bold">
-                  {activityLabel(topRecommendation.activity)}
+            <div className="relative flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-3xl">
+                <div className="mb-3 inline-flex rounded-full border border-[rgb(var(--season-rgb)_/_0.35)] bg-[rgb(var(--season-rgb)_/_0.10)] px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-200">
+                  Best upcoming option
                 </div>
 
-                <div className="mt-2 inline-flex rounded-full bg-blue-500 px-3 py-1 text-sm font-bold text-white">
-                  {topRecommendation.predicted_score ?? "?"} ·{" "}
-                  {topRecommendation.label ?? "No label"}
+                <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                  {activityLabel(topRecommendation.activity)} looks like your best bet.
+                </h2>
+
+                <p className="mt-3 text-slate-300">
+                  For {recommendationDateLabel}, this activity has the strongest
+                  combination of weather, score, and planning value.
+                </p>
+
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <ScoreBadge
+                    score={
+                      topRecommendation.planning_score ??
+                      topRecommendation.predicted_score
+                    }
+                    label={topRecommendation.label}
+                    size="lg"
+                  />
+
+                  {topRecommendation.forecast_confidence_label && (
+                    <Badge variant="info">
+                      {topRecommendation.forecast_confidence_label} confidence
+                    </Badge>
+                  )}
                 </div>
 
-                <div className="mt-3 text-sm text-slate-300">
-                  {topRecommendation.date ?? "Unknown date"}
-                </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  <WeatherStat
+                    label="Temperature"
+                    value={`${topRecommendation.avg_temp ?? "?"}°F`}
+                  />
 
-                <div className="mt-2 text-sm text-slate-400">
-                  {topRecommendation.avg_temp ?? "?"}°F · wind{" "}
-                  {topRecommendation.wind_max ?? "?"} mph · rain{" "}
-                  {topRecommendation.rain_chance ?? "?"}%
+                  <WeatherStat
+                    label="Wind"
+                    value={`${topRecommendation.wind_max ?? "?"} mph`}
+                  />
+
+                  <WeatherStat
+                    label="Rain"
+                    value={`${topRecommendation.rain_chance ?? "?"}%`}
+                  />
                 </div>
 
                 {topRecommendation.activity === "Fishing" &&
                   topRecommendation.best_species && (
-                    <div className="mt-2 text-sm text-blue-300">
-                      Best target: {topRecommendation.best_species}{" "}
-                      {topRecommendation.best_species_score !== null
-                        ? `(${topRecommendation.best_species_score})`
-                        : ""}
+                    <div className="mt-4">
+                      <Badge variant="info">
+                        Best target: {topRecommendation.best_species}
+                        {topRecommendation.best_species_score !== null
+                          ? ` (${topRecommendation.best_species_score})`
+                          : ""}
+                      </Badge>
                     </div>
                   )}
 
                 {topRecommendation.explanation && (
-                  <p className="mt-4 text-sm text-slate-300">
-                    {topRecommendation.explanation}
-                  </p>
+                  <Panel className="mt-5">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Why this recommendation
+                    </div>
+
+                    <p className="mt-2 text-sm leading-6 text-slate-300">
+                      {topRecommendation.explanation}
+                    </p>
+                  </Panel>
                 )}
               </div>
 
-              <div className="grid gap-2">
-                <button
-                  type="button"
+              <div className="grid min-w-48 gap-2">
+                <Button
                   onClick={saveRecommendationAsPlan}
                   disabled={savingRecommendationPlan}
-                  className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {savingRecommendationPlan ? "Saving..." : "Save as plan"}
-                </button>
+                </Button>
 
                 {topRecommendation.date && topRecommendation.activity && (
                   <RecommendationCalendarLink prediction={topRecommendation} />
@@ -658,7 +751,7 @@ export default function Home() {
 
                 <Link
                   href="/planner"
-                  className="rounded-lg bg-slate-700 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-slate-600"
+                  className="rounded-lg bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
                 >
                   Open Planner
                 </Link>
@@ -666,65 +759,76 @@ export default function Home() {
             </div>
 
             {recommendationMessage && (
-              <div className="mt-4 rounded-lg bg-green-900/50 p-3 text-green-200">
+              <StatusMessage type="success">
                 {recommendationMessage}
-              </div>
+              </StatusMessage>
             )}
 
             {recommendationError && (
-              <div className="mt-4 rounded-lg bg-red-900/50 p-3 text-red-200">
+              <StatusMessage type="error">
                 {recommendationError}
-              </div>
+              </StatusMessage>
             )}
-          </section>
+          </Card>
+        ) : (
+          <EmptyState
+            title="No recommendation ready yet"
+            description="Add a saved location, set activity defaults, or rate a few scenarios so Hobby Weather can start giving better suggestions."
+            action={
+              <div className="flex flex-wrap justify-center gap-2">
+                <Link
+                  href="/locations"
+                  className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-400"
+                >
+                  Add location
+                </Link>
+
+                <Link
+                  href="/scenarios"
+                  className="rounded-lg bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10"
+                >
+                  Rate scenarios
+                </Link>
+              </div>
+            }
+          />
         )}
+      </section>
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Prediction Pipeline</h2>
+      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Setup complete"
+          value={`${setupCompleteCount}/${setupTotalCount}`}
+          hint="More setup means better recommendations."
+        />
 
-          {latestPipelineRun ? (
-            <div className="mt-4 grid gap-3 text-sm text-slate-300">
-              <div>
-                <span className="font-semibold text-white">Status:</span>{" "}
-                {latestPipelineRun.status ?? "Unknown"}
-              </div>
+        <StatCard
+          label="Plans"
+          value={counts.plannedActivities}
+          hint="Saved activities you might do."
+        />
 
-              <div>
-                <span className="font-semibold text-white">Last run:</span>{" "}
-                {latestPipelineRun.created_at ?? "Unknown"}
-              </div>
+        <StatCard
+          label="Logs"
+          value={counts.activityLogs}
+          hint="Real feedback for better scoring."
+        />
 
-              <div>
-                <span className="font-semibold text-white">Users processed:</span>{" "}
-                {latestPipelineRun.users_processed ?? "N/A"}
-              </div>
+        <StatCard
+          label="Scenario ratings"
+          value={counts.scenarioRatings}
+          hint={`${Math.round(scenarioProgress * 100)}% of first target.`}
+        />
+      </section>
 
-              <div>
-                <span className="font-semibold text-white">Predictions written:</span>{" "}
-                {latestPipelineRun.predictions_written ?? "N/A"}
-              </div>
+      <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_1fr]">
+        <Card>
+          <SectionTitle
+            title="Next best setup steps"
+            description="These help Hobby Weather personalize your recommendations."
+          />
 
-              {latestPipelineRun.error_message && (
-                <div className="rounded-lg bg-red-900/50 p-3 text-red-200">
-                  {latestPipelineRun.error_message}
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="mt-4 text-slate-300">
-              No prediction pipeline runs found yet.
-            </p>
-          )}
-        </section>
-
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">Setup Checklist</h2>
-
-          <p className="mt-2 text-sm text-slate-300">
-            Complete these steps to get better recommendations over time.
-          </p>
-
-          <div className="mt-4 grid gap-3">
+          <div className="mt-5 grid gap-3">
             <ChecklistItem
               complete={counts.savedLocations > 0}
               label="Add at least one saved location"
@@ -732,26 +836,8 @@ export default function Home() {
             />
 
             <ChecklistItem
-              complete={counts.activityLogs > 0}
-              label="Log your first activity"
-              href="/logs"
-            />
-
-            <ChecklistItem
-              complete={counts.plannedActivities > 0}
-              label="Create your first plan"
-              href="/plans"
-            />
-
-            <ChecklistItem
-              complete={counts.scenarioRatings >= 5}
-              label="Rate at least 5 scenarios"
-              href="/scenarios"
-            />
-
-            <ChecklistItem
               complete={counts.activityDefaults > 0}
-              label="Set at least one activity default location"
+              label="Choose default locations for activities"
               href="/activity-defaults"
             />
 
@@ -760,180 +846,143 @@ export default function Home() {
               label="Add your weekly schedule"
               href="/schedule"
             />
-          </div>
-        </section>
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">
-                Scenario Rating Progress
-              </h2>
-
-              <p className="text-sm text-slate-300">
-                First target: {SCENARIO_TOTAL_GOAL} total ratings
-                ({SCENARIO_GOAL_PER_ACTIVITY} per activity).
-              </p>
-            </div>
-
-            <Link
+            <ChecklistItem
+              complete={counts.scenarioRatings >= 5}
+              label="Rate at least 5 scenarios"
               href="/scenarios"
-              className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
-            >
-              Rate scenarios
-            </Link>
-          </div>
-
-          <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-800">
-            <div
-              className="h-full rounded-full bg-blue-500"
-              style={{
-                width: `${Math.round(scenarioProgress * 100)}%`,
-              }}
             />
           </div>
+        </Card>
 
-          <p className="mt-2 text-sm text-slate-300">
-            {counts.scenarioRatings}/{SCENARIO_TOTAL_GOAL} ratings complete
-          </p>
-        </section>
+        <Card>
+          <SectionTitle
+            title="Quick actions"
+            description="Tell the app what you want to do next."
+          />
 
-        <section className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl bg-slate-900 p-5 shadow">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold">
-                Upcoming Plans
-              </h2>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <QuickAction href="/planner" label="Find a plan" />
+            <QuickAction href="/logs" label="Log activity" />
+            <QuickAction href="/scenarios" label="Rate scenarios" />
+            <QuickAction href="/locations" label="Add location" />
+          </div>
+        </Card>
+      </section>
 
+      <section className="mt-8 grid gap-6 lg:grid-cols-2">
+        <Card>
+          <SectionTitle
+            title="Upcoming plans"
+            action={
               <Link
                 href="/plans"
-                className="text-sm font-semibold text-blue-300 hover:text-blue-200"
+                className="text-sm font-semibold text-sky-300 hover:text-sky-200"
               >
                 View all
               </Link>
-            </div>
+            }
+          />
 
-            {upcomingPlans.length === 0 ? (
-              <p className="mt-4 text-slate-300">
-                No upcoming plans yet.
-              </p>
-            ) : (
-              <div className="mt-4 grid gap-3">
-                {upcomingPlans.map((plan) => (
-                  <div
-                    key={plan.id}
-                    className="rounded-xl border border-slate-700 bg-slate-800 p-4"
-                  >
-                    <div className="font-semibold">
-                      {plan.activity ?? "Unknown activity"}
-                    </div>
-
-                    <div className="mt-1 text-sm text-slate-300">
-                      {plan.planned_date ?? "Unknown date"} ·{" "}
-                      {plan.planned_window || "No window"} ·{" "}
-                      {plan.status ?? "Unknown status"}
-                    </div>
-
-                    {plan.location_name && (
-                      <div className="mt-1 text-sm text-slate-400">
-                        {plan.location_name}
-                      </div>
-                    )}
+          {upcomingPlans.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-300">
+              No upcoming plans yet. Save a recommendation or create a plan.
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-3">
+              {upcomingPlans.slice(0, 3).map((plan) => (
+                <Panel key={plan.id}>
+                  <div className="font-semibold text-white">
+                    {plan.activity ?? "Unknown activity"}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
 
-          <div className="rounded-2xl bg-slate-900 p-5 shadow">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold">
-                Recent Logs
-              </h2>
+                  <div className="mt-1 text-sm text-slate-300">
+                    {formatFriendlyDate(plan.planned_date)} ·{" "}
+                    {plan.planned_window || "No window"} ·{" "}
+                    {plan.status ?? "Unknown status"}
+                  </div>
 
+                  {plan.location_name && (
+                    <div className="mt-1 text-sm text-slate-400">
+                      {plan.location_name}
+                    </div>
+                  )}
+                </Panel>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <SectionTitle
+            title="Recent logs"
+            action={
               <Link
                 href="/logs"
-                className="text-sm font-semibold text-blue-300 hover:text-blue-200"
+                className="text-sm font-semibold text-sky-300 hover:text-sky-200"
               >
                 View all
               </Link>
-            </div>
+            }
+          />
 
-            {recentLogs.length === 0 ? (
-              <p className="mt-4 text-slate-300">
-                No activity logs yet.
-              </p>
-            ) : (
-              <div className="mt-4 grid gap-3">
-                {recentLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="rounded-xl border border-slate-700 bg-slate-800 p-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="font-semibold">
-                          {log.activity ?? "Unknown activity"}
-                        </div>
-
-                        <div className="mt-1 text-sm text-slate-300">
-                          {log.date ?? "Unknown date"}
-                        </div>
+          {recentLogs.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-300">
+              No logs yet. Logging activities helps the app learn what you enjoy.
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-3">
+              {recentLogs.slice(0, 3).map((log) => (
+                <Panel key={log.id}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-white">
+                        {log.activity ?? "Unknown activity"}
                       </div>
 
-                      <div className="rounded-full bg-blue-500 px-3 py-1 text-sm font-bold">
-                        {log.actual_enjoyment_1_to_10 ?? "?"}/10
+                      <div className="mt-1 text-sm text-slate-300">
+                        {formatFriendlyDate(log.date)}
                       </div>
                     </div>
 
-                    {log.notes && (
-                      <p className="mt-3 text-sm text-slate-300">
-                        {log.notes}
-                      </p>
-                    )}
+                    <Badge variant="info">
+                      {log.actual_enjoyment_1_to_10 ?? "?"}/10
+                    </Badge>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
 
-        <section className="mt-8 rounded-2xl bg-slate-900 p-5 shadow">
-          <h2 className="text-xl font-semibold">
-            Quick Actions
-          </h2>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            <QuickAction href="/locations" label="Add location" />
-            <QuickAction href="/logs" label="Log activity" />
-            <QuickAction href="/plans" label="Create plan" />
-            <QuickAction href="/scenarios" label="Rate scenario" />
-            <QuickAction href="/preferences" label="Edit preferences" />
-          </div>
-        </section>
-      </>
-  
+                  {log.notes && (
+                    <p className="mt-3 text-sm leading-6 text-slate-300">
+                      {log.notes}
+                    </p>
+                  )}
+                </Panel>
+              ))}
+            </div>
+          )}
+        </Card>
+      </section>
+    </>
   );
-}
+  }
 
-function DashboardCard({
-  label,
-  value,
-  href,
-}: {
-  label: string;
-  value: number;
-  href: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="rounded-2xl bg-slate-900 p-5 shadow hover:bg-slate-800"
-    >
-      <div className="text-3xl font-bold">{value}</div>
-      <div className="mt-1 text-sm text-slate-300">{label}</div>
-    </Link>
-  );
+  function DashboardCard({
+    label,
+    value,
+    href,
+  }: {
+    label: string;
+    value: number;
+    href: string;
+  }) {
+    return (
+      <Link
+        href={href}
+        className="rounded-2xl bg-slate-900 p-5 shadow hover:bg-slate-800"
+      >
+        <div className="text-3xl font-bold">{value}</div>
+        <div className="mt-1 text-sm text-slate-300">{label}</div>
+      </Link>
+    );
 }
 
 function QuickAction({
@@ -946,7 +995,7 @@ function QuickAction({
   return (
     <Link
       href={href}
-      className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
+      className="rounded-xl border border-slate-700/70 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white transition hover:border-[rgb(var(--season-rgb)_/_0.35)] hover:bg-[rgb(var(--season-rgb)_/_0.10)]"
     >
       {label}
     </Link>
@@ -965,19 +1014,13 @@ function ChecklistItem({
   return (
     <Link
       href={href}
-      className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800 p-4 hover:bg-slate-700"
+      className="flex items-center justify-between gap-3 rounded-xl border border-slate-700/70 bg-white/[0.04] p-4 transition hover:border-[rgb(var(--season-rgb)_/_0.35)] hover:bg-[rgb(var(--season-rgb)_/_0.10)]"
     >
-      <span className="font-medium">{label}</span>
+      <span className="text-sm font-medium text-slate-200">{label}</span>
 
-      <span
-        className={`rounded-full px-3 py-1 text-xs font-bold ${
-          complete
-            ? "bg-green-600 text-white"
-            : "bg-slate-700 text-slate-300"
-        }`}
-      >
+      <Badge variant={complete ? "good" : "neutral"}>
         {complete ? "Done" : "To do"}
-      </span>
+      </Badge>
     </Link>
   );
 }
@@ -1023,4 +1066,55 @@ function RecommendationCalendarLink({
       Add to calendar
     </a>
   );
+}
+
+function getGreeting() {
+  const hour = new Date().getHours();
+
+  if (hour >= 5 && hour < 12) {
+    return "Good morning";
+  }
+
+  if (hour >= 12 && hour < 17) {
+    return "Good afternoon";
+  }
+
+  if (hour >= 17 && hour < 21) {
+    return "Good evening";
+  }
+
+  return "Good evening";
+}
+
+function formatFriendlyDate(dateString: string | null | undefined) {
+  if (!dateString) {
+    return "Unknown date";
+  }
+
+  const date = new Date(`${dateString}T12:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return dateString;
+  }
+
+  const today = new Date();
+  const todayString = today.toISOString().slice(0, 10);
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowString = tomorrow.toISOString().slice(0, 10);
+
+  if (dateString === todayString) {
+    return "Today";
+  }
+
+  if (dateString === tomorrowString) {
+    return "Tomorrow";
+  }
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
