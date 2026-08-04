@@ -10,7 +10,18 @@ import {
   makeIcsDownloadHref,
   parseWindowToDates,
 } from "@/lib/calendar";
-import { PageHeader, Card, StatusMessage } from "@/components/ui";
+import {
+  PageHeader,
+  Card,
+  StatusMessage,
+  SectionTitle,
+  ScoreBadge,
+  WeatherStat,
+  Badge,
+  Panel,
+  Button,
+  EmptyState,
+} from "@/components/ui";
 
 type PredictionRow = {
   date: string | null;
@@ -64,10 +75,12 @@ export default function PlannerPage() {
 
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedActivity, setSelectedActivity] = useState("");
+  const [plannerView, setPlannerView] = useState<"day" | "activity">("day");
 
   const [planMessage, setPlanMessage] = useState("");
   const [planError, setPlanError] = useState("");
   const [savingPlanKey, setSavingPlanKey] = useState<string | null>(null);
+  const planningRange = useMemo(() => getPlanningDateRange(), []);
 
   useEffect(() => {
     if (!user) {
@@ -93,10 +106,12 @@ export default function PlannerPage() {
     // --------------------------------------------------
 
     const { data: userPredictionData, error: userPredictionError } = await supabase
-      .from("user_predictions")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("date", { ascending: true });
+        .from("user_predictions")
+        .select("*")
+        .eq("user_id", user.id)
+        .gte("date", planningRange.startDate)
+        .lte("date", planningRange.endDate)
+        .order("date", { ascending: true });
 
     if (userPredictionError) {
       setErrorMessage(userPredictionError.message);
@@ -164,6 +179,8 @@ export default function PlannerPage() {
               "best_species_score",
             ].join(",")
           )
+          .gte("date", planningRange.startDate)
+          .lte("date", planningRange.endDate)
           .order("date", { ascending: true });
 
       if (fallbackPredictionError) {
@@ -207,19 +224,55 @@ export default function PlannerPage() {
       }));
     }
 
-    setPredictions(loadedPredictions);
+    loadedPredictions = loadedPredictions
+        .filter((item) =>
+            isDateInPlanningWindow(
+            item.date,
+            planningRange.startDate,
+            planningRange.endDate
+            )
+        )
+        .sort((a, b) => {
+            const dateCompare = String(a.date ?? "").localeCompare(String(b.date ?? ""));
+
+            if (dateCompare !== 0) {
+            return dateCompare;
+            }
+
+            return (
+            (b.planning_score ?? b.predicted_score ?? 0) -
+            (a.planning_score ?? a.predicted_score ?? 0)
+            );
+        });
+
+        setPredictions(loadedPredictions);
 
     const dates = Array.from(
-      new Set(
-        loadedPredictions
-          .map((item) => item.date)
-          .filter(Boolean)
-      )
-    ) as string[];
+        new Set(
+            loadedPredictions
+            .map((item) => item.date)
+            .filter(Boolean)
+        )
+        ) as string[];
 
-    if (dates.length > 0 && selectedDate === "") {
-      setSelectedDate(dates[0]);
-    }
+        if (dates.length > 0 && (selectedDate === "" || !dates.includes(selectedDate))) {
+        setSelectedDate(dates[0]);
+        }
+
+        const activities = Array.from(
+        new Set(
+            loadedPredictions
+            .map((item) => item.activity)
+            .filter(Boolean)
+        )
+        ) as string[];
+
+        if (
+        activities.length > 0 &&
+        (selectedActivity === "" || !activities.includes(selectedActivity))
+        ) {
+        setSelectedActivity(activities[0]);
+        }
 
     const { data: plansData, error: plansError } = await supabase
       .from("planned_activities")
@@ -232,7 +285,7 @@ export default function PlannerPage() {
       return;
     }
 
-    setPlans(plansData ?? []);
+    setPlans((plansData ?? []) as unknown as PlannedActivity[]);
     setLoading(false);
   }
 
@@ -267,6 +320,14 @@ export default function PlannerPage() {
           (a.planning_score ?? a.predicted_score ?? 0)
       );
   }, [predictions, selectedActivity]);
+
+  const bestPrediction = useMemo(() => {
+    return [...predictions].sort(
+        (a, b) =>
+        (b.planning_score ?? b.predicted_score ?? 0) -
+        (a.planning_score ?? a.predicted_score ?? 0)
+    )[0] ?? null;
+    }, [predictions]);
 
   function planAlreadyExists(prediction: PredictionRow) {
     return plans.some(
@@ -392,86 +453,203 @@ export default function PlannerPage() {
 
       {!loading && !errorMessage && predictions.length === 0 && (
         <Card className="mt-8">
-          <p className="text-slate-300">
-            No cached predictions found yet.
-          </p>
+            <EmptyState
+            title="No predictions in the 14-day planning window"
+            description="Planner only shows predictions from tomorrow through the next 14 days. If you expected more options, your prediction pipeline may need to generate additional forecast days."
+            />
         </Card>
-      )}
+        )}
+
+        {bestPrediction && (
+            <Card className="mt-8">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                    <div className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-sky-300">
+                    Best in the next 14 days
+                    </div>
+
+                    <h2 className="text-2xl font-bold tracking-tight text-white">
+                    {activityLabel(bestPrediction.activity)}
+                    </h2>
+
+                    <p className="mt-2 text-sm text-slate-300">
+                    {formatFriendlyDate(bestPrediction.date)} ·{" "}
+                    {getRecommendedWindow(bestPrediction)}
+                    </p>
+
+                    {bestPrediction.location_name && (
+                    <p className="mt-1 text-sm text-slate-400">
+                        {bestPrediction.location_name}
+                    </p>
+                    )}
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <ScoreBadge
+                    score={bestPrediction.planning_score ?? bestPrediction.predicted_score}
+                    label={bestPrediction.label}
+                    size="lg"
+                    />
+
+                    <div className="flex flex-wrap gap-2">
+                    <WeatherStat
+                        label="Temp"
+                        value={`${bestPrediction.avg_temp ?? "?"}°F`}
+                    />
+
+                    <WeatherStat
+                        label="Wind"
+                        value={`${bestPrediction.wind_max ?? "?"} mph`}
+                    />
+
+                    <WeatherStat
+                        label="Rain"
+                        value={`${bestPrediction.rain_chance ?? "?"}%`}
+                    />
+                    </div>
+                </div>
+                </div>
+            </Card>
+            )}
 
       {predictions.length > 0 && (
-        <>
-          <Card className="mt-8">
-            <h2 className="text-xl font-semibold">Choose a Day</h2>
-
-            <label className="mt-4 grid gap-1">
-              <span className="text-sm text-slate-300">Date</span>
-              <select
-                value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value)}
-                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-              >
-                {availableDates.map((date) => (
-                  <option key={date}>{date}</option>
-                ))}
-              </select>
-            </label>
-
-            <div className="mt-4 grid gap-3">
-              {dayPredictions.slice(0, 5).map((prediction) => (
-                <PredictionCard
-                  key={`${prediction.date}-${prediction.activity}`}
-                  prediction={prediction}
-                  alreadyPlanned={planAlreadyExists(prediction)}
-                  saving={savingPlanKey === `${prediction.date}-${prediction.activity}`}
-                  onSavePlan={() => saveAsPlanned(prediction)}
-                  windowText={getRecommendedWindow(prediction)}
-                  description={buildDescription(
-                    prediction,
-                    getRecommendedWindow(prediction)
-                  )}
+        <section className="mt-8">
+            <Card>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <SectionTitle
+                title="Plan by day or activity"
+                description={`Showing predictions from ${formatFriendlyDate(
+                    planningRange.startDate
+                )} through ${formatFriendlyDate(planningRange.endDate)}.`}
                 />
-              ))}
+
+                <div className="inline-flex rounded-xl border border-slate-700 bg-slate-950/60 p-1">
+                <button
+                    type="button"
+                    onClick={() => setPlannerView("day")}
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                    plannerView === "day"
+                        ? "bg-[rgb(var(--season-rgb)_/_0.16)] text-white"
+                        : "text-slate-300 hover:bg-white/5 hover:text-white"
+                    }`}
+                >
+                    By day
+                </button>
+
+                <button
+                    type="button"
+                    onClick={() => setPlannerView("activity")}
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                    plannerView === "activity"
+                        ? "bg-[rgb(var(--season-rgb)_/_0.16)] text-white"
+                        : "text-slate-300 hover:bg-white/5 hover:text-white"
+                    }`}
+                >
+                    By activity
+                </button>
+                </div>
             </div>
-          </Card>
 
-          <Card className="mt-8">
-            <h2 className="text-xl font-semibold">Choose an Activity</h2>
+            {plannerView === "day" && (
+                <div className="mt-6">
+                <label className="grid gap-1">
+                    <span className="text-sm font-medium text-slate-300">
+                    Choose a date
+                    </span>
 
-            <label className="mt-4 grid gap-1">
-              <span className="text-sm text-slate-300">Activity</span>
-              <select
-                value={selectedActivity}
-                onChange={(event) =>
-                  setSelectedActivity(event.target.value)
-                }
-                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-              >
-                <option value="">Choose activity</option>
-                {availableActivities.map((activity) => (
-                  <option key={activity}>{activity}</option>
-                ))}
-              </select>
-            </label>
+                    <select
+                    value={selectedDate}
+                    onChange={(event) => setSelectedDate(event.target.value)}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+                    >
+                    {availableDates.map((date) => (
+                        <option key={date} value={date}>
+                        {formatFriendlyDate(date)} · {date}
+                        </option>
+                    ))}
+                    </select>
+                </label>
 
-            <div className="mt-4 grid gap-3">
-              {selectedActivityRows.slice(0, 5).map((prediction) => (
-                <PredictionCard
-                  key={`${prediction.activity}-${prediction.date}`}
-                  prediction={prediction}
-                  alreadyPlanned={planAlreadyExists(prediction)}
-                  saving={savingPlanKey === `${prediction.date}-${prediction.activity}`}
-                  onSavePlan={() => saveAsPlanned(prediction)}
-                  windowText={getRecommendedWindow(prediction)}
-                  description={buildDescription(
-                    prediction,
-                    getRecommendedWindow(prediction)
-                  )}
-                />
-              ))}
-            </div>
-          </Card>
-        </>
-      )}
+                <div className="mt-4 grid gap-3">
+                    {dayPredictions.length === 0 ? (
+                    <EmptyState
+                        title="No recommendations for this day"
+                        description="Try another date in the 14-day planning window."
+                    />
+                    ) : (
+                    dayPredictions.slice(0, 5).map((prediction) => (
+                        <PredictionCard
+                        key={`${prediction.date}-${prediction.activity}`}
+                        prediction={prediction}
+                        alreadyPlanned={planAlreadyExists(prediction)}
+                        saving={
+                            savingPlanKey ===
+                            `${prediction.date}-${prediction.activity}`
+                        }
+                        onSavePlan={() => saveAsPlanned(prediction)}
+                        windowText={getRecommendedWindow(prediction)}
+                        description={buildDescription(
+                            prediction,
+                            getRecommendedWindow(prediction)
+                        )}
+                        />
+                    ))
+                    )}
+                </div>
+                </div>
+            )}
+
+            {plannerView === "activity" && (
+                <div className="mt-6">
+                <label className="grid gap-1">
+                    <span className="text-sm font-medium text-slate-300">
+                    Choose an activity
+                    </span>
+
+                    <select
+                    value={selectedActivity}
+                    onChange={(event) => setSelectedActivity(event.target.value)}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+                    >
+                    {availableActivities.map((activity) => (
+                        <option key={activity} value={activity}>
+                        {activityLabel(activity)}
+                        </option>
+                    ))}
+                    </select>
+                </label>
+
+                <div className="mt-4 grid gap-3">
+                    {selectedActivityRows.length === 0 ? (
+                    <EmptyState
+                        title="No recommendations for this activity"
+                        description="Try another activity or check whether predictions have been generated."
+                    />
+                    ) : (
+                    selectedActivityRows.slice(0, 5).map((prediction) => (
+                        <PredictionCard
+                        key={`${prediction.activity}-${prediction.date}`}
+                        prediction={prediction}
+                        alreadyPlanned={planAlreadyExists(prediction)}
+                        saving={
+                            savingPlanKey ===
+                            `${prediction.date}-${prediction.activity}`
+                        }
+                        onSavePlan={() => saveAsPlanned(prediction)}
+                        windowText={getRecommendedWindow(prediction)}
+                        description={buildDescription(
+                            prediction,
+                            getRecommendedWindow(prediction)
+                        )}
+                        />
+                    ))
+                    )}
+                </div>
+                </div>
+            )}
+            </Card>
+        </section>
+        )}
     </>
   );
 }
@@ -506,104 +684,96 @@ function PredictionCard({
 
   const downloadHref = makeIcsDownloadHref(icsText);
 
+  const displayScore = prediction.planning_score ?? prediction.predicted_score;
+
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-800 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="text-lg font-semibold">
-            {activityLabel(prediction.activity)}
-          </div>
-
-          <div className="mt-1 text-sm text-slate-300">
-            {prediction.date ?? "Unknown date"} · {prediction.label ?? "No label"}
-          </div>
-
-          <div className="mt-2 text-sm text-slate-400">
-            {prediction.avg_temp ?? "?"}°F · wind {prediction.wind_max ?? "?"} mph · rain{" "}
-            {prediction.rain_chance ?? "?"}%
-          </div>
-
-          {prediction.location_name && (
-            <div className="mt-2 text-sm text-blue-300">
-              Location: {prediction.location_name}
+    <Panel className="transition hover:border-[rgb(var(--season-rgb)_/_0.35)]">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-lg font-semibold text-white">
+              {activityLabel(prediction.activity)}
             </div>
-          )}
 
-          {prediction.planning_score != null && (
-            <div className="mt-2 text-sm text-slate-300">
-              Planning score: {prediction.planning_score}
-              {prediction.forecast_confidence_label
-                ? ` · ${prediction.forecast_confidence_label}`
-                : ""}
+            <div className="mt-1 text-sm text-slate-300">
+              {formatFriendlyDate(prediction.date)} · {windowText}
             </div>
-          )}
 
-          <div className="mt-2 text-sm text-slate-300">
-            Window: {windowText}
-          </div>
-
-          {prediction.activity === "Fishing" && prediction.best_species && (
-            <div className="mt-2 text-sm text-blue-300">
-              Best target: {prediction.best_species}{" "}
-              {prediction.best_species_score !== null
-                ? `(${prediction.best_species_score})`
-                : ""}
-            </div>
-          )}
-
-          {alreadyPlanned && (
-            <div className="mt-2 inline-flex rounded-full bg-green-600 px-3 py-1 text-xs font-bold text-white">
-              Already planned
-            </div>
-          )}
-
-          {prediction.explanation && (
-            <p className="mt-3 text-sm text-slate-300">
-              {prediction.explanation}
-            </p>
-          )}
-
-          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
-            <details>
-              <summary className="cursor-pointer font-semibold text-white">
-                Scoring details
-              </summary>
-
-              <div className="mt-3 grid gap-1">
-                <div>Rule score: {prediction.rule_score ?? "N/A"}</div>
-                <div>ML score: {prediction.ml_score ?? "N/A"}</div>
-                <div>Final score: {prediction.final_score ?? "N/A"}</div>
-                <div>Blended score: {prediction.blended_score ?? "N/A"}</div>
-                <div>Rule weight: {prediction.rule_weight ?? "N/A"}</div>
-                <div>ML weight: {prediction.ml_weight ?? "N/A"}</div>
-                <div>ML status: {prediction.ml_status ?? "N/A"}</div>
-                <div>Model version: {prediction.model_version ?? "N/A"}</div>
-                <div>Scoring method: {prediction.scoring_method ?? "N/A"}</div>
-                <div>Prediction source: {prediction.prediction_source ?? "N/A"}</div>
-
-                {prediction.model_explanation && (
-                  <div className="mt-2 text-slate-400">
-                    {prediction.model_explanation}
-                  </div>
-                )}
+            {prediction.location_name && (
+              <div className="mt-2 text-sm text-sky-300">
+                Location: {prediction.location_name}
               </div>
-            </details>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <ScoreBadge
+              score={displayScore}
+              label={prediction.label}
+              size="md"
+            />
+
+            {alreadyPlanned && (
+              <Badge variant="good">
+                Planned
+              </Badge>
+            )}
           </div>
         </div>
 
-        <div className="grid gap-2">
-          <div className="rounded-full bg-blue-500 px-3 py-1 text-center text-sm font-bold">
-            {prediction.predicted_score ?? "?"}
-          </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <WeatherStat
+            label="Temp"
+            value={`${prediction.avg_temp ?? "?"}°F`}
+          />
 
-          <button
-            type="button"
+          <WeatherStat
+            label="Wind"
+            value={`${prediction.wind_max ?? "?"} mph`}
+          />
+
+          <WeatherStat
+            label="Rain"
+            value={`${prediction.rain_chance ?? "?"}%`}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {prediction.forecast_confidence_label && (
+            <Badge variant="info">
+              {prediction.forecast_confidence_label} confidence
+            </Badge>
+          )}
+
+          {prediction.window_score !== null && prediction.window_score !== undefined && (
+            <Badge variant="neutral">
+              Window score: {prediction.window_score}
+            </Badge>
+          )}
+
+          {prediction.activity === "Fishing" && prediction.best_species && (
+            <Badge variant="info">
+              Best target: {prediction.best_species}
+              {prediction.best_species_score !== null
+                ? ` (${prediction.best_species_score})`
+                : ""}
+            </Badge>
+          )}
+        </div>
+
+        {prediction.explanation && (
+          <p className="text-sm leading-6 text-slate-300">
+            {prediction.explanation}
+          </p>
+        )}
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button
             onClick={onSavePlan}
             disabled={alreadyPlanned || saving}
-            className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {alreadyPlanned ? "Planned" : saving ? "Saving..." : "Save as plan"}
-          </button>
+            {alreadyPlanned ? "Already planned" : saving ? "Saving..." : "Save as plan"}
+          </Button>
 
           <a
             href={downloadHref}
@@ -611,12 +781,97 @@ function PredictionCard({
               prediction.activity ?? "activity",
               prediction.date ?? "date"
             )}
-            className="rounded-lg bg-slate-700 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-slate-600"
+            className="rounded-lg bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
           >
             Add to calendar
           </a>
         </div>
+
+        <details className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-3 text-sm text-slate-300">
+          <summary className="cursor-pointer font-semibold text-white">
+            Scoring details
+          </summary>
+
+          <div className="mt-3 grid gap-1">
+            <div>Rule score: {prediction.rule_score ?? "N/A"}</div>
+            <div>ML score: {prediction.ml_score ?? "N/A"}</div>
+            <div>Final score: {prediction.final_score ?? "N/A"}</div>
+            <div>Blended score: {prediction.blended_score ?? "N/A"}</div>
+            <div>Rule weight: {prediction.rule_weight ?? "N/A"}</div>
+            <div>ML weight: {prediction.ml_weight ?? "N/A"}</div>
+            <div>ML status: {prediction.ml_status ?? "N/A"}</div>
+            <div>Model version: {prediction.model_version ?? "N/A"}</div>
+            <div>Scoring method: {prediction.scoring_method ?? "N/A"}</div>
+            <div>Prediction source: {prediction.prediction_source ?? "N/A"}</div>
+
+            {prediction.model_explanation && (
+              <div className="mt-2 text-slate-400">
+                {prediction.model_explanation}
+              </div>
+            )}
+          </div>
+        </details>
       </div>
-    </div>
+    </Panel>
   );
+}
+
+function toDateString(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function getPlanningDateRange() {
+  const today = new Date();
+
+  const start = new Date(today);
+  start.setDate(start.getDate() + 1);
+
+  const end = new Date(today);
+  end.setDate(end.getDate() + 14);
+
+  return {
+    startDate: toDateString(start),
+    endDate: toDateString(end),
+  };
+}
+
+function isDateInPlanningWindow(
+  dateString: string | null,
+  startDate: string,
+  endDate: string
+) {
+  if (!dateString) {
+    return false;
+  }
+
+  return dateString >= startDate && dateString <= endDate;
+}
+
+function formatFriendlyDate(dateString: string | null | undefined) {
+  if (!dateString) {
+    return "Unknown date";
+  }
+
+  const date = new Date(`${dateString}T12:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return dateString;
+  }
+
+  const today = new Date();
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const tomorrowString = toDateString(tomorrow);
+
+  if (dateString === tomorrowString) {
+    return "Tomorrow";
+  }
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }

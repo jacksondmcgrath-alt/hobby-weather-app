@@ -62,27 +62,46 @@ export function NavBar() {
 
   return (
     <nav className="sticky top-3 z-40 mb-6 rounded-2xl border border-slate-800/80 bg-slate-950/85 px-3 py-2 shadow-xl shadow-slate-950/40 backdrop-blur-xl">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <Link
-          href="/"
-          className="group flex shrink-0 items-center gap-2 rounded-xl px-1 py-1"
-        >
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-[rgb(var(--season-rgb)_/_0.30)] bg-[rgb(var(--season-rgb)_/_0.10)] text-xs font-black tracking-tight text-white shadow-[0_0_16px_rgb(var(--season-rgb)_/_0.12)] transition group-hover:bg-[rgb(var(--season-rgb)_/_0.16)]">
-            HW
-          </div>
-
-          <div className="leading-tight">
-            <div className="text-sm font-bold tracking-tight text-white transition group-hover:text-[rgb(var(--season-soft-rgb))]">
-              Hobby Weather
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            href="/"
+            className="group flex min-w-0 shrink-0 items-center gap-2 rounded-xl px-1 py-1"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[rgb(var(--season-rgb)_/_0.30)] bg-[rgb(var(--season-rgb)_/_0.10)] text-xs font-black tracking-tight text-white shadow-[0_0_16px_rgb(var(--season-rgb)_/_0.12)] transition group-hover:bg-[rgb(var(--season-rgb)_/_0.16)]">
+              HW
             </div>
 
-            <div className="hidden text-[11px] text-slate-400 sm:block">
-              Forecasts for better plans
-            </div>
-          </div>
-        </Link>
+            <div className="min-w-0 leading-tight">
+              <div className="truncate text-sm font-bold tracking-tight text-white transition group-hover:text-[rgb(var(--season-soft-rgb))]">
+                Hobby Weather
+              </div>
 
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 md:justify-end">
+              <div className="hidden text-[11px] text-slate-400 sm:block">
+                Forecasts for better plans
+              </div>
+            </div>
+          </Link>
+
+          {!authLoading && user && (
+            <button
+              type="button"
+              onClick={() => setMenuOpen((current) => !current)}
+              className={`shrink-0 rounded-xl border px-3 py-1.5 text-sm font-semibold transition md:hidden ${
+                menuIsActive || menuOpen
+                  ? "border-[rgb(var(--season-rgb)_/_0.35)] bg-[rgb(var(--season-rgb)_/_0.14)] text-white"
+                  : "border-transparent text-slate-300 hover:bg-[rgb(var(--season-rgb)_/_0.12)] hover:text-white"
+              }`}
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+            >
+              Menu
+            </button>
+          )}
+        </div>
+
+        {/* Desktop nav */}
+        <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-1 md:flex md:justify-end">
           {navItems.map((item) => (
             <NavLink
               key={item.href}
@@ -113,40 +132,74 @@ export function NavBar() {
 
               {menuOpen && (
                 <div className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/95 p-2 shadow-2xl shadow-slate-950/80 backdrop-blur-xl">
-                  <MenuSection title="Setup">
-                    {SETUP_NAV_ITEMS.map((item) => (
-                      <MenuLink
-                        key={item.href}
-                        href={item.href}
-                        label={item.label}
-                        active={isActive(item.href)}
-                      />
-                    ))}
-                  </MenuSection>
-
-                  {isAdmin && (
-                    <>
-                      <div className="my-2 h-px bg-slate-800" />
-
-                      <MenuSection title="Admin">
-                        {ADMIN_NAV_ITEMS.map((item) => (
-                          <MenuLink
-                            key={item.href}
-                            href={item.href}
-                            label={item.label}
-                            active={isActive(item.href)}
-                          />
-                        ))}
-                      </MenuSection>
-                    </>
-                  )}
+                  <MoreMenuContent isAdmin={isAdmin} isActive={isActive} />
                 </div>
               )}
             </div>
           )}
         </div>
+
+        {/* Mobile nav */}
+        <div className="flex gap-1 overflow-x-auto pb-1 md:hidden">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.href}
+              href={item.href}
+              label={item.label}
+              active={isActive(item.href)}
+              compact
+            />
+          ))}
+        </div>
+
+        {/* Mobile More panel */}
+        {menuOpen && !authLoading && user && (
+          <div className="mt-2 rounded-2xl border border-slate-800 bg-slate-950/95 p-2 shadow-2xl shadow-slate-950/70 backdrop-blur-xl md:hidden">
+            <MoreMenuContent isAdmin={isAdmin} isActive={isActive} />
+          </div>
+        )}
       </div>
     </nav>
+  );
+}
+
+function MoreMenuContent({
+  isAdmin,
+  isActive,
+}: {
+  isAdmin: boolean;
+  isActive: (href: string) => boolean;
+}) {
+  return (
+    <>
+      <MenuSection title="Setup">
+        {SETUP_NAV_ITEMS.map((item) => (
+          <MenuLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            active={isActive(item.href)}
+          />
+        ))}
+      </MenuSection>
+
+      {isAdmin && (
+        <>
+          <div className="my-2 h-px bg-slate-800" />
+
+          <MenuSection title="Admin">
+            {ADMIN_NAV_ITEMS.map((item) => (
+              <MenuLink
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                active={isActive(item.href)}
+              />
+            ))}
+          </MenuSection>
+        </>
+      )}
+    </>
   );
 }
 
@@ -154,15 +207,19 @@ function NavLink({
   href,
   label,
   active,
+  compact = false,
 }: {
   href: string;
   label: string;
   active: boolean;
+  compact?: boolean;
 }) {
   return (
     <Link
       href={href}
-      className={`inline-flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-sm font-semibold transition ${
+      className={`inline-flex shrink-0 items-center gap-2 rounded-xl border text-sm font-semibold transition ${
+        compact ? "px-2.5 py-1.5" : "px-2.5 py-1.5"
+      } ${
         active
           ? "border-[rgb(var(--season-rgb)_/_0.35)] bg-[rgb(var(--season-rgb)_/_0.14)] text-white shadow-[0_0_18px_rgb(var(--season-rgb)_/_0.12)]"
           : "border-transparent text-slate-300 hover:bg-[rgb(var(--season-rgb)_/_0.12)] hover:text-white"

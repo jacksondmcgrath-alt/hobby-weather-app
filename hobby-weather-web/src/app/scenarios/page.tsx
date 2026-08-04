@@ -4,7 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { trackEvent } from "@/lib/trackEvent";
-import { PageHeader, Card, StatusMessage } from "@/components/ui";
+import {
+  PageHeader,
+  Card,
+  StatusMessage,
+  SectionTitle,
+  StatCard,
+  WeatherStat,
+  Panel,
+  Button,
+  Badge,
+  EmptyState,
+} from "@/components/ui";
 
 type ScenarioRating = {
   id: number;
@@ -480,7 +491,7 @@ export default function ScenariosPage() {
       source: "nextjs_random_scenario_v1",
     });
 
-    setSaveMessage("Scenario rating saved.");
+    setSaveMessage("Scenario rating saved. Here’s another one to rate.");
     setScenario(generateScenario(activity));
     setRating(5);
     setConfidence(7);
@@ -612,31 +623,214 @@ export default function ScenariosPage() {
         description="Rate hypothetical activity conditions to help train future scoring models."
       />
 
-      <Card className="mt-8">
-        <h2 className="text-xl font-semibold">Scenario Insights</h2>
+      <Card className="mt-8 relative overflow-hidden">
+        <div className="pointer-events-none absolute right-[-6rem] top-[-6rem] h-64 w-64 rounded-full bg-[rgb(var(--season-rgb)_/_0.12)] blur-3xl" />
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-slate-800 p-4">
-            <div className="text-3xl font-bold">{totalScenarioRatings}</div>
-            <div className="text-sm text-slate-300">Total ratings</div>
-          </div>
+        <div className="relative">
+          <SectionTitle
+            title="Rate this scenario"
+            description="Imagine these conditions for the selected activity. Rate how good it sounds to you."
+            action={
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setScenario(generateScenario(activity))}
+              >
+                Generate different scenario
+              </Button>
+            }
+          />
 
-          <div className="rounded-xl bg-slate-800 p-4">
-            <div className="text-3xl font-bold">{averageScenarioRating}</div>
-            <div className="text-sm text-slate-300">Average rating</div>
-          </div>
+          <form onSubmit={handleSaveScenarioRating} className="mt-6 grid gap-5">
+            <label className="grid gap-1">
+              <span className="text-sm font-medium text-slate-300">
+                Activity
+              </span>
 
-          <div className="rounded-xl bg-slate-800 p-4">
-            <div className="text-3xl font-bold">{averageScenarioConfidence}</div>
-            <div className="text-sm text-slate-300">Average confidence</div>
-          </div>
+              <select
+                value={activity}
+                onChange={(event) => setActivity(event.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+              >
+                {ACTIVITY_OPTIONS.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+
+            <Panel>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-sky-300">
+                    Scenario
+                  </div>
+
+                  <h3 className="mt-1 text-xl font-semibold text-white">
+                    {activity}
+                  </h3>
+                </div>
+
+                <Badge variant="neutral">
+                  Synthetic training example
+                </Badge>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {scenarioRows.map((row) => (
+                  <WeatherStat
+                    key={row.factor}
+                    label={row.factor}
+                    value={String(row.value)}
+                  />
+                ))}
+              </div>
+            </Panel>
+
+            <Panel>
+              <div className="flex flex-col gap-5">
+                <label className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-slate-300">
+                      How good does this sound?
+                    </span>
+
+                    <span className="rounded-full bg-[rgb(var(--season-rgb)_/_0.14)] px-3 py-1 text-sm font-bold text-white">
+                      {rating}/10
+                    </span>
+                  </div>
+
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={rating}
+                    onChange={(event) => setRating(Number(event.target.value))}
+                  />
+
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>Bad</span>
+                    <span>Great</span>
+                  </div>
+                </label>
+
+                <label className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-slate-300">
+                      How confident are you?
+                    </span>
+
+                    <span className="rounded-full bg-slate-700 px-3 py-1 text-sm font-bold text-white">
+                      {confidence}/10
+                    </span>
+                  </div>
+
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={confidence}
+                    onChange={(event) => setConfidence(Number(event.target.value))}
+                  />
+
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>Guessing</span>
+                    <span>Very sure</span>
+                  </div>
+                </label>
+              </div>
+            </Panel>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-sm font-medium text-slate-300">
+                  Experience level
+                </span>
+
+                <select
+                  value={experienceLevel}
+                  onChange={(event) => setExperienceLevel(event.target.value)}
+                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+                >
+                  {EXPERIENCE_OPTIONS.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
+                <input
+                  type="checkbox"
+                  checked={assumeSafeConditions}
+                  onChange={(event) =>
+                    setAssumeSafeConditions(event.target.checked)
+                  }
+                />
+
+                <span className="text-sm text-slate-300">
+                  Assume normal safety precautions are taken
+                </span>
+              </label>
+            </div>
+
+            <label className="grid gap-1">
+              <span className="text-sm font-medium text-slate-300">
+                Notes, optional
+              </span>
+
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Example: Wind seems too high, or this looks ideal."
+                className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+              />
+            </label>
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button type="submit" disabled={saving}>
+                {saving ? "Saving..." : "Save & show next"}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setScenario(generateScenario(activity));
+                  setRating(5);
+                  setConfidence(7);
+                  setNotes("");
+                }}
+              >
+                Skip this scenario
+              </Button>
+            </div>
+          </form>
+
+          {saveMessage && (
+            <StatusMessage type="success">
+              {saveMessage}
+            </StatusMessage>
+          )}
+
+          {saveError && (
+            <StatusMessage type="error">
+              {saveError}
+            </StatusMessage>
+          )}
         </div>
+      </Card>
 
-        <div className="mt-6 grid gap-3">
+      <Card className="mt-8">
+        <SectionTitle
+          title="Scenario progress"
+          description="First goal: rate 25 scenarios for each activity."
+        />
+
+        <div className="mt-5 grid gap-3">
           {scenarioSummaryByActivity.map((item) => (
             <div key={item.activity}>
-              <div className="mb-1 flex items-center justify-between text-sm">
-                <span>{item.activity}</span>
+              <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                <span className="font-medium text-white">{item.activity}</span>
+
                 <span className="text-slate-300">
                   {item.count}/{item.goal} · avg {item.averageRating}
                 </span>
@@ -644,7 +838,7 @@ export default function ScenariosPage() {
 
               <div className="h-2 overflow-hidden rounded-full bg-slate-800">
                 <div
-                  className="h-full rounded-full bg-blue-500"
+                  className="h-full rounded-full bg-[rgb(var(--season-rgb))]"
                   style={{
                     width: `${Math.round(item.progress * 100)}%`,
                   }}
@@ -655,141 +849,35 @@ export default function ScenariosPage() {
         </div>
       </Card>
 
-      <Card className="mt-8">
-        <h2 className="text-xl font-semibold">Rate a Scenario</h2>
+      <section className="mt-8 grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Total ratings"
+          value={totalScenarioRatings}
+          hint="More ratings improve future scoring."
+        />
 
-        <form onSubmit={handleSaveScenarioRating} className="mt-4 grid gap-5">
-          <label className="grid gap-1">
-            <span className="text-sm text-slate-300">Activity</span>
-            <select
-              value={activity}
-              onChange={(event) => setActivity(event.target.value)}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-            >
-              {ACTIVITY_OPTIONS.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </select>
-          </label>
+        <StatCard
+          label="Average rating"
+          value={averageScenarioRating}
+          hint="Your average scenario score."
+        />
 
-          <div className="rounded-xl border border-slate-700 bg-slate-800 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h3 className="text-lg font-semibold">Scenario</h3>
-
-              <button
-                type="button"
-                onClick={() => setScenario(generateScenario(activity))}
-                className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-              >
-                Generate new scenario
-              </button>
-            </div>
-
-            <div className="mt-4 grid gap-2">
-              {scenarioRows.map((row) => (
-                <div
-                  key={row.factor}
-                  className="flex justify-between rounded-lg bg-slate-900 px-3 py-2 text-sm"
-                >
-                  <span className="text-slate-300">{row.factor}</span>
-                  <span className="font-semibold text-white">
-                    {String(row.value)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <label className="grid gap-2">
-            <span className="text-sm text-slate-300">
-              Rating: {rating}/10
-            </span>
-            <input
-              type="range"
-              min={1}
-              max={10}
-              value={rating}
-              onChange={(event) => setRating(Number(event.target.value))}
-            />
-          </label>
-
-          <label className="grid gap-2">
-            <span className="text-sm text-slate-300">
-              Confidence: {confidence}/10
-            </span>
-            <input
-              type="range"
-              min={1}
-              max={10}
-              value={confidence}
-              onChange={(event) => setConfidence(Number(event.target.value))}
-            />
-          </label>
-
-          <label className="grid gap-1">
-            <span className="text-sm text-slate-300">Experience level</span>
-            <select
-              value={experienceLevel}
-              onChange={(event) => setExperienceLevel(event.target.value)}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-            >
-              {EXPERIENCE_OPTIONS.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
-            <input
-              type="checkbox"
-              checked={assumeSafeConditions}
-              onChange={(event) =>
-                setAssumeSafeConditions(event.target.checked)
-              }
-            />
-            <span className="text-sm text-slate-300">
-              Assume normal safety precautions are taken
-            </span>
-          </label>
-
-          <label className="grid gap-1">
-            <span className="text-sm text-slate-300">Notes</span>
-            <textarea
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Example: Wind seems too high, or this looks ideal."
-              className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {saving ? "Saving..." : "Save scenario rating"}
-          </button>
-        </form>
-
-        {saveMessage && (
-          <StatusMessage type="success">
-            {saveMessage}
-          </StatusMessage>
-        )}
-
-        {saveError && (
-          <StatusMessage type="error">
-            {saveError}
-          </StatusMessage>
-        )}
-      </Card>
+        <StatCard
+          label="Average confidence"
+          value={averageScenarioConfidence}
+          hint="How sure you usually feel."
+        />
+      </section>
 
       <Card className="mt-8">
-        <h2 className="text-xl font-semibold">Your Scenario Ratings</h2>
+        <SectionTitle
+          title="Recent ratings"
+          description="Showing your last 5 ratings in case you need to fix or remove one."
+        />
 
         {ratingsLoading && (
           <p className="mt-4 text-slate-300">
-            Loading scenario ratings...
+            Loading recent ratings...
           </p>
         )}
 
@@ -812,161 +900,189 @@ export default function ScenariosPage() {
         )}
 
         {!ratingsLoading && !ratingsError && ratings.length === 0 && (
-          <p className="mt-4 text-slate-300">
-            No scenario ratings yet.
-          </p>
+          <EmptyState
+            title="No ratings yet"
+            description="Rate your first scenario above. Your recent ratings will appear here."
+          />
         )}
 
-        <div className="mt-4 grid gap-3">
-          {ratings.slice(0, 25).map((item) => (
-            <div
-              key={item.id}
-              className="rounded-xl border border-slate-700 bg-slate-800 p-4"
-            >
-              {editingId === item.id ? (
-                <div className="grid gap-4">
-                  <div className="text-lg font-semibold">
-                    Editing {item.activity ?? "Unknown activity"}
-                  </div>
+        {ratings.length > 0 && (
+          <div className="mt-4 grid gap-3">
+            {ratings.slice(0, 5).map((item) => (
+              <Panel key={item.id}>
+                {editingId === item.id ? (
+                  <div className="grid gap-4">
+                    <div>
+                      <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                        Editing recent rating
+                      </div>
 
-                  <label className="grid gap-2">
-                    <span className="text-sm text-slate-300">
-                      Rating: {editRating}/10
-                    </span>
-                    <input
-                      type="range"
-                      min={1}
-                      max={10}
-                      value={editRating}
-                      onChange={(event) =>
-                        setEditRating(Number(event.target.value))
-                      }
-                    />
-                  </label>
-
-                  <label className="grid gap-2">
-                    <span className="text-sm text-slate-300">
-                      Confidence: {editConfidence}/10
-                    </span>
-                    <input
-                      type="range"
-                      min={1}
-                      max={10}
-                      value={editConfidence}
-                      onChange={(event) =>
-                        setEditConfidence(Number(event.target.value))
-                      }
-                    />
-                  </label>
-
-                  <label className="grid gap-1">
-                    <span className="text-sm text-slate-300">
-                      Experience level
-                    </span>
-                    <select
-                      value={editExperienceLevel}
-                      onChange={(event) =>
-                        setEditExperienceLevel(event.target.value)
-                      }
-                      className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                    >
-                      {EXPERIENCE_OPTIONS.map((option) => (
-                        <option key={option}>{option}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-3">
-                    <input
-                      type="checkbox"
-                      checked={editAssumeSafeConditions}
-                      onChange={(event) =>
-                        setEditAssumeSafeConditions(event.target.checked)
-                      }
-                    />
-                    <span className="text-sm text-slate-300">
-                      Assume normal safety precautions are taken
-                    </span>
-                  </label>
-
-                  <label className="grid gap-1">
-                    <span className="text-sm text-slate-300">Notes</span>
-                    <textarea
-                      value={editNotes}
-                      onChange={(event) => setEditNotes(event.target.value)}
-                      className="min-h-24 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-blue-400"
-                    />
-                  </label>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => saveScenarioEdits(item)}
-                      disabled={workingId === item.id}
-                      className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {workingId === item.id ? "Saving..." : "Save edits"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={cancelEditing}
-                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="text-lg font-semibold">
-                      {item.activity ?? "Unknown activity"}
+                      <div className="mt-1 text-lg font-semibold text-white">
+                        {item.activity ?? "Unknown activity"}
+                      </div>
                     </div>
 
-                    <div className="mt-1 text-sm text-slate-300">
-                      {item.source ?? "unknown source"} · confidence{" "}
-                      {item.rater_confidence ?? "?"}/10
-                    </div>
+                    <label className="grid gap-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-300">
+                          Rating
+                        </span>
 
-                    <div className="mt-2 text-sm text-slate-400">
-                      {describeScenarioRating(item)}
-                    </div>
+                        <span className="rounded-full bg-[rgb(var(--season-rgb)_/_0.14)] px-3 py-1 text-sm font-bold text-white">
+                          {editRating}/10
+                        </span>
+                      </div>
 
-                    {item.notes && (
-                      <p className="mt-3 text-sm text-slate-300">
-                        {item.notes}
-                      </p>
-                    )}
+                      <input
+                        type="range"
+                        min={1}
+                        max={10}
+                        value={editRating}
+                        onChange={(event) =>
+                          setEditRating(Number(event.target.value))
+                        }
+                      />
+                    </label>
+
+                    <label className="grid gap-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-300">
+                          Confidence
+                        </span>
+
+                        <span className="rounded-full bg-slate-700 px-3 py-1 text-sm font-bold text-white">
+                          {editConfidence}/10
+                        </span>
+                      </div>
+
+                      <input
+                        type="range"
+                        min={1}
+                        max={10}
+                        value={editConfidence}
+                        onChange={(event) =>
+                          setEditConfidence(Number(event.target.value))
+                        }
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm text-slate-300">
+                        Experience level
+                      </span>
+
+                      <select
+                        value={editExperienceLevel}
+                        onChange={(event) =>
+                          setEditExperienceLevel(event.target.value)
+                        }
+                        className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+                      >
+                        {EXPERIENCE_OPTIONS.map((option) => (
+                          <option key={option}>{option}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-3">
+                      <input
+                        type="checkbox"
+                        checked={editAssumeSafeConditions}
+                        onChange={(event) =>
+                          setEditAssumeSafeConditions(event.target.checked)
+                        }
+                      />
+
+                      <span className="text-sm text-slate-300">
+                        Assume normal safety precautions are taken
+                      </span>
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm text-slate-300">
+                        Notes
+                      </span>
+
+                      <textarea
+                        value={editNotes}
+                        onChange={(event) => setEditNotes(event.target.value)}
+                        className="min-h-24 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+                      />
+                    </label>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        onClick={() => saveScenarioEdits(item)}
+                        disabled={workingId === item.id}
+                      >
+                        {workingId === item.id ? "Saving..." : "Save edits"}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={cancelEditing}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
+                ) : (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-semibold text-white">
+                          {item.activity ?? "Unknown activity"}
+                        </div>
 
-                  <div className="flex flex-col gap-2">
-                    <div className="rounded-full bg-blue-500 px-3 py-1 text-center text-sm font-bold">
-                      {item.rating ?? "?"}/10
+                        <Badge variant="info">
+                          {item.rating ?? "?"}/10
+                        </Badge>
+                      </div>
+
+                      <div className="mt-1 text-sm text-slate-400">
+                        Confidence {item.rater_confidence ?? "?"}/10 ·{" "}
+                        {item.rater_experience_level ?? "Experience unknown"}
+                      </div>
+
+                      <div className="mt-2 text-sm text-slate-400">
+                        {describeScenarioRating(item)}
+                      </div>
+
+                      {item.notes && (
+                        <p className="mt-3 text-sm leading-6 text-slate-300">
+                          {item.notes}
+                        </p>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => startEditing(item)}
-                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                    >
-                      Edit
-                    </button>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => startEditing(item)}
+                      >
+                        Edit
+                      </Button>
 
-                    <button
-                      type="button"
-                      onClick={() => deleteScenarioRating(item.id)}
-                      disabled={workingId === item.id}
-                      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {workingId === item.id ? "Deleting..." : "Delete"}
-                    </button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => deleteScenarioRating(item.id)}
+                        disabled={workingId === item.id}
+                      >
+                        {workingId === item.id ? "Deleting..." : "Delete"}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+                )}
+              </Panel>
+            ))}
+          </div>
+        )}
       </Card>
     </>
   );
