@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 
 from supabase import create_client
 
@@ -20,6 +20,15 @@ DEFAULT_PREFERENCES = {
     "disc_golf_wind_sensitivity": 6,
 }
 
+PLANNING_START_DAYS = 1
+PLANNING_HORIZON_DAYS = 14
+
+
+def get_planning_date_window():
+    start_date = date.today() + timedelta(days=PLANNING_START_DAYS)
+    end_date = date.today() + timedelta(days=PLANNING_HORIZON_DAYS)
+
+    return start_date.isoformat(), end_date.isoformat()
 
 def get_supabase_client():
     return create_client(
@@ -101,10 +110,17 @@ def get_user_id(user):
 
 
 def load_prediction_history(supabase):
+    start_date, end_date = get_planning_date_window()
+
+    print(f"Loading prediction_history from {start_date} through {end_date}")
+
     response = (
         supabase
         .table("prediction_history")
         .select("*")
+        .gte("date", start_date)
+        .lte("date", end_date)
+        .order("date")
         .execute()
     )
 
@@ -606,10 +622,13 @@ def main():
         if len(users) == 0 or len(prediction_history) == 0:
             log_pipeline_run(
                 supabase,
-                status="completed_no_data_v4_1",
+                status="completed_no_future_prediction_history_v4_1",
                 users_processed=len(users),
                 predictions_written=0,
-                error_message=None,
+                error_message=(
+                    "No prediction_history rows found in the planning window "
+                    "from tomorrow through 14 days ahead."
+                ),
             )
             return
 
@@ -633,8 +652,16 @@ def main():
 
             rows_to_upsert = []
 
+            start_date, end_date = get_planning_date_window()
+
             for prediction in prediction_history:
-                if not prediction.get("date") or not prediction.get("activity"):
+                prediction_date = prediction.get("date")
+                prediction_activity = prediction.get("activity")
+
+                if not prediction_date or not prediction_activity:
+                    continue
+
+                if prediction_date < start_date or prediction_date > end_date:
                     continue
 
                 rows_to_upsert.append(
