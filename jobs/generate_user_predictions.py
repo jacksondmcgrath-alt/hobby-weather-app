@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
@@ -281,6 +282,7 @@ def generate_predictions_for_location(location, preferences):
     longitude = location.get("longitude")
 
     if latitude is None or longitude is None:
+        print(f"Skipping location {location.get('name')} because coordinates are missing.")
         return pd.DataFrame()
 
     manual_water_temp = location.get("manual_water_temp")
@@ -290,27 +292,43 @@ def generate_predictions_for_location(location, preferences):
         f"({latitude}, {longitude})"
     )
 
-    base_predictions = generate_predictions(
-        latitude=float(latitude),
-        longitude=float(longitude),
-        days=FORECAST_DAYS,
-        manual_water_temp=manual_water_temp,
-        include_air_quality=True,
-    )
+    try:
+        base_predictions = generate_predictions(
+            latitude=float(latitude),
+            longitude=float(longitude),
+            days=FORECAST_DAYS,
+            manual_water_temp=manual_water_temp,
+            include_air_quality=True,
+        )
+    except Exception as error:
+        print(
+            f"Failed to generate forecast for location {location.get('name')}: "
+            f"{type(error).__name__}: {error}"
+        )
+        return pd.DataFrame()
 
-    base_predictions = filter_predictions_to_planning_window(base_predictions)
+    try:
+        base_predictions = filter_predictions_to_planning_window(base_predictions)
 
-    if len(base_predictions) == 0:
-        return base_predictions
+        if len(base_predictions) == 0:
+            print(f"No predictions in planning window for location {location.get('name')}.")
+            return base_predictions
 
-    adjusted_predictions = apply_preference_adjustments(
-        predictions=base_predictions,
-        preferences=preferences,
-    )
+        adjusted_predictions = apply_preference_adjustments(
+            predictions=base_predictions,
+            preferences=preferences,
+        )
 
-    adjusted_predictions = add_forecast_confidence(adjusted_predictions)
+        adjusted_predictions = add_forecast_confidence(adjusted_predictions)
 
-    return adjusted_predictions
+        return adjusted_predictions
+
+    except Exception as error:
+        print(
+            f"Failed to process predictions for location {location.get('name')}: "
+            f"{type(error).__name__}: {error}"
+        )
+        return pd.DataFrame()
 
 
 def build_user_prediction_row(user_id, prediction, location):
@@ -537,6 +555,8 @@ def main():
                         location=location,
                         preferences=preferences,
                     )
+
+                    time.sleep(1)
 
                 predictions = forecast_cache_by_location_key[key]
 

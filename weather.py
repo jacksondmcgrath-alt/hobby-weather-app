@@ -13,7 +13,7 @@ from utils import get_json_with_retries
 # Weather fetching
 # =========================
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400, show_spinner=False)
 def fetch_historical_weather(latitude, longitude, start_date, end_date):
     """
     Fetches historical hourly weather from Open-Meteo Archive API.
@@ -47,8 +47,8 @@ def fetch_historical_weather(latitude, longitude, start_date, end_date):
     data = get_json_with_retries(
         ARCHIVE_URL,
         params=params,
-        timeout=15,
-        retries=2,
+        timeout=30,
+        retries=3,
     )
 
     df = pd.DataFrame(data["hourly"])
@@ -57,7 +57,7 @@ def fetch_historical_weather(latitude, longitude, start_date, end_date):
     return df
 
 
-@st.cache_data(ttl=7200)
+@st.cache_data(ttl=7200, show_spinner=False)
 def fetch_weather_forecast(latitude, longitude, days):
     """
     Gets hourly weather forecast data from Open-Meteo.
@@ -101,7 +101,7 @@ def fetch_weather_forecast(latitude, longitude, days):
     return df
 
 
-@st.cache_data(ttl=7200)
+@st.cache_data(ttl=7200, show_spinner=False)
 def fetch_air_quality_forecast(latitude, longitude, days):
     """
     Gets air quality and UV data from Open-Meteo Air Quality API.
@@ -140,7 +140,7 @@ def fetch_air_quality_forecast(latitude, longitude, days):
         )
 
 
-@st.cache_data(ttl=7200)
+@st.cache_data(ttl=7200, show_spinner=False)
 def fetch_sun_times(latitude, longitude, days):
     """
     Gets sunrise and sunset times from Open-Meteo.
