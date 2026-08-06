@@ -1,11 +1,36 @@
 import os
-from datetime import datetime, timezone, date, timedelta
+import sys
+from pathlib import Path
+from datetime import date, datetime, timedelta, timezone
 
+import pandas as pd
 from supabase import create_client
+
+
+# --------------------------------------------------
+# Environment compatibility
+# --------------------------------------------------
+
+# Some older modules expect SUPABASE_KEY.
+# GitHub Actions commonly stores the service key as SUPABASE_SERVICE_ROLE_KEY.
+if not os.environ.get("SUPABASE_KEY") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+    os.environ["SUPABASE_KEY"] = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+
+# Make repo root importable when running from jobs/
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(REPO_ROOT))
+
+
+from scoring import (  # noqa: E402
+    generate_predictions,
+    apply_preference_adjustments,
+    add_forecast_confidence,
+)
 
 
 DEFAULT_PREFERENCES = {
@@ -20,15 +45,10 @@ DEFAULT_PREFERENCES = {
     "disc_golf_wind_sensitivity": 6,
 }
 
+FORECAST_DAYS = 15
 PLANNING_START_DAYS = 1
 PLANNING_HORIZON_DAYS = 14
 
-
-def get_planning_date_window():
-    start_date = date.today() + timedelta(days=PLANNING_START_DAYS)
-    end_date = date.today() + timedelta(days=PLANNING_HORIZON_DAYS)
-
-    return start_date.isoformat(), end_date.isoformat()
 
 def get_supabase_client():
     return create_client(
@@ -37,8 +57,11 @@ def get_supabase_client():
     )
 
 
-def clamp_score(score):
-    return max(0, min(100, score))
+def get_planning_date_window():
+    start_date = date.today() + timedelta(days=PLANNING_START_DAYS)
+    end_date = date.today() + timedelta(days=PLANNING_HORIZON_DAYS)
+
+    return start_date, end_date
 
 
 def clean_number(value):
@@ -46,47 +69,50 @@ def clean_number(value):
         return None
 
     try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    try:
         return float(value)
     except Exception:
         return None
 
 
-def safe_value(value, default=0):
-    number_value = clean_number(value)
+def clean_value(value):
+    """
+    Makes values safe for Supabase JSON columns.
+    """
 
-    if number_value is None:
-        return default
+    if value is None:
+        return None
 
-    return number_value
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
 
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
 
-def score_label(score):
-    if score >= 80:
-        return "Great"
-    if score >= 60:
-        return "Good"
-    if score >= 40:
-        return "Okay"
+    if isinstance(value, dict):
+        return {
+            str(key): clean_value(nested_value)
+            for key, nested_value in value.items()
+        }
 
-    return "Poor"
+    if isinstance(value, list):
+        return [clean_value(item) for item in value]
 
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            pass
 
-def log_pipeline_run(
-    supabase,
-    status,
-    users_processed=0,
-    predictions_written=0,
-    error_message=None,
-):
-    row = {
-        "run_source": "github_actions",
-        "status": status,
-        "users_processed": users_processed,
-        "predictions_written": predictions_written,
-        "error_message": error_message,
-    }
-
-    supabase.table("prediction_pipeline_runs").insert(row).execute()
+    return value
 
 
 def load_users(supabase):
@@ -107,114 +133,6 @@ def get_user_id(user):
         return user.get("id")
 
     return getattr(user, "id", None)
-
-
-def load_prediction_history(supabase):
-    start_date, end_date = get_planning_date_window()
-
-    print(f"Loading prediction_history from {start_date} through {end_date}")
-
-    response = (
-        supabase
-        .table("prediction_history")
-        .select("*")
-        .gte("date", start_date)
-        .lte("date", end_date)
-        .order("date")
-        .execute()
-    )
-
-    return response.data or []
-
-
-def load_latest_time_recommendations(supabase):
-    """
-    Loads the latest time_recommendations JSON from forecast_cache.
-
-    Returns a lookup:
-    {
-        "YYYY-MM-DD": {
-            "Fishing": {"window": "...", "score": 80},
-            ...
-        }
-    }
-    """
-
-    try:
-        response = (
-            supabase
-            .table("forecast_cache")
-            .select("generated_at,time_recommendations")
-            .order("generated_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-
-        rows = response.data or []
-
-        if len(rows) == 0:
-            return {}
-
-        time_recommendations = rows[0].get("time_recommendations") or []
-
-        lookup = {}
-
-        for item in time_recommendations:
-            date = item.get("date")
-
-            if not date:
-                continue
-
-            lookup[date] = {
-                "Fishing": {
-                    "window": item.get("Best Fishing Window"),
-                    "score": clean_number(item.get("Fishing Window Score")),
-                },
-                "Running": {
-                    "window": item.get("Best Running Window"),
-                    "score": clean_number(item.get("Running Window Score")),
-                },
-                "Kayaking": {
-                    "window": item.get("Best Kayaking Window"),
-                    "score": clean_number(item.get("Kayaking Window Score")),
-                },
-                "Disc Golf": {
-                    "window": item.get("Best Disc Golf Window"),
-                    "score": clean_number(item.get("Disc Golf Window Score")),
-                },
-                "Tennis": {
-                    "window": item.get("Best Tennis Window"),
-                    "score": clean_number(item.get("Tennis Window Score")),
-                },
-                "Beach Day": {
-                    "window": item.get("Best Beach Day Window"),
-                    "score": clean_number(item.get("Beach Day Window Score")),
-                },
-            }
-
-        return lookup
-
-    except Exception as error:
-        print(f"Could not load time recommendations: {error}")
-        return {}
-
-
-def get_time_recommendation(time_lookup, date, activity):
-    """
-    Returns recommended window and score for a date/activity.
-    """
-
-    if not date or not activity:
-        return None, None
-
-    day_lookup = time_lookup.get(date, {})
-
-    activity_item = day_lookup.get(activity)
-
-    if not activity_item:
-        return None, None
-
-    return activity_item.get("window"), activity_item.get("score")
 
 
 def load_user_preferences(supabase, user_id):
@@ -280,6 +198,24 @@ def build_location_lookup(saved_locations):
     return lookup
 
 
+def find_home_location(saved_locations):
+    for location in saved_locations:
+        location_type = str(location.get("location_type") or "").lower()
+
+        if location_type == "home":
+            return location
+
+    return None
+
+
+def find_first_valid_location(saved_locations):
+    for location in saved_locations:
+        if location.get("latitude") is not None and location.get("longitude") is not None:
+            return location
+
+    return None
+
+
 def build_activity_default_lookup(activity_defaults, location_lookup):
     lookup = {}
 
@@ -320,319 +256,240 @@ def build_location_context(location):
     }
 
 
-def calculate_preference_adjustment(prediction, preferences):
-    adjustment = 0
+def location_key(location):
+    return str(location.get("id"))
 
-    activity = prediction.get("activity")
 
-    avg_temp = safe_value(prediction.get("avg_temp"), 60)
-    wind_max = safe_value(prediction.get("wind_max"), 0)
-    gust_max = safe_value(prediction.get("gust_max"), 0)
-    rain_chance = safe_value(prediction.get("rain_chance"), 0)
-    bug_index = safe_value(prediction.get("bug_index"), 0)
+def filter_predictions_to_planning_window(predictions):
+    start_date, end_date = get_planning_date_window()
 
-    bug_tolerance = safe_value(
-        preferences.get("bug_tolerance"),
-        DEFAULT_PREFERENCES["bug_tolerance"],
+    filtered = predictions.copy()
+    filtered["date"] = pd.to_datetime(filtered["date"], errors="coerce").dt.date
+
+    filtered = filtered[
+        (filtered["date"] >= start_date)
+        & (filtered["date"] <= end_date)
+    ].copy()
+
+    filtered["date"] = pd.to_datetime(filtered["date"]).dt.strftime("%Y-%m-%d")
+
+    return filtered
+
+
+def generate_predictions_for_location(location, preferences):
+    latitude = location.get("latitude")
+    longitude = location.get("longitude")
+
+    if latitude is None or longitude is None:
+        return pd.DataFrame()
+
+    manual_water_temp = location.get("manual_water_temp")
+
+    print(
+        f"Fetching forecast for location {location.get('name')} "
+        f"({latitude}, {longitude})"
     )
 
-    if activity in ["Camping", "Running", "Disc Golf", "Kayaking", "Tennis"]:
-        if bug_index > 45:
-            bug_penalty = ((bug_index - 45) / 10) * (10 - bug_tolerance) * 0.7
-            adjustment -= bug_penalty
-
-    rain_caution = safe_value(
-        preferences.get("rain_caution"),
-        DEFAULT_PREFERENCES["rain_caution"],
+    base_predictions = generate_predictions(
+        latitude=float(latitude),
+        longitude=float(longitude),
+        days=FORECAST_DAYS,
+        manual_water_temp=manual_water_temp,
+        include_air_quality=True,
     )
 
-    if activity == "Camping":
-        rain_threshold = 20
-    elif activity == "Kayaking":
-        rain_threshold = 20
-    elif activity == "Beach Day":
-        rain_threshold = 25
-    elif activity == "Tennis":
-        rain_threshold = 20
-    elif activity == "Running":
-        rain_threshold = 30
-    elif activity == "Disc Golf":
-        rain_threshold = 30
-    else:
-        rain_threshold = 40
+    base_predictions = filter_predictions_to_planning_window(base_predictions)
 
-    if rain_chance > rain_threshold:
-        rain_penalty = ((rain_chance - rain_threshold) / 10) * rain_caution * 0.5
-        adjustment -= rain_penalty
+    if len(base_predictions) == 0:
+        return base_predictions
 
-    if activity == "Fishing":
-        fishing_bug_boost = safe_value(
-            preferences.get("fishing_bug_boost"),
-            DEFAULT_PREFERENCES["fishing_bug_boost"],
-        )
+    adjusted_predictions = apply_preference_adjustments(
+        predictions=base_predictions,
+        preferences=preferences,
+    )
 
-        fishing_wind_tolerance = safe_value(
-            preferences.get("fishing_wind_tolerance"),
-            DEFAULT_PREFERENCES["fishing_wind_tolerance"],
-        )
+    adjusted_predictions = add_forecast_confidence(adjusted_predictions)
 
-        if 35 <= bug_index <= 75:
-            adjustment += (fishing_bug_boost - 5) * 1.5
-
-        if wind_max > 12:
-            wind_penalty = (wind_max - 12) * (10 - fishing_wind_tolerance) * 0.25
-            adjustment -= wind_penalty
-
-        if 4 <= wind_max <= 12:
-            adjustment += fishing_wind_tolerance * 0.4
-
-    if activity == "Camping":
-        camping_bug_sensitivity = safe_value(
-            preferences.get("camping_bug_sensitivity"),
-            DEFAULT_PREFERENCES["camping_bug_sensitivity"],
-        )
-
-        if bug_index > 40:
-            bug_penalty = ((bug_index - 40) / 10) * camping_bug_sensitivity * 0.8
-            adjustment -= bug_penalty
-
-    if activity == "Running":
-        running_wind_sensitivity = safe_value(
-            preferences.get("running_wind_sensitivity"),
-            DEFAULT_PREFERENCES["running_wind_sensitivity"],
-        )
-
-        running_heat_sensitivity = safe_value(
-            preferences.get("running_heat_sensitivity"),
-            DEFAULT_PREFERENCES["running_heat_sensitivity"],
-        )
-
-        if wind_max > 8:
-            adjustment -= (wind_max - 8) * running_wind_sensitivity * 0.25
-
-        if avg_temp > 60:
-            adjustment -= (avg_temp - 60) * running_heat_sensitivity * 0.25
-
-    if activity == "Kayaking":
-        kayaking_wind_caution = safe_value(
-            preferences.get("kayaking_wind_caution"),
-            DEFAULT_PREFERENCES["kayaking_wind_caution"],
-        )
-
-        if wind_max > 8:
-            adjustment -= (wind_max - 8) * kayaking_wind_caution * 0.4
-
-        if gust_max > 15:
-            adjustment -= (gust_max - 15) * kayaking_wind_caution * 0.25
-
-    if activity == "Disc Golf":
-        disc_golf_wind_sensitivity = safe_value(
-            preferences.get("disc_golf_wind_sensitivity"),
-            DEFAULT_PREFERENCES["disc_golf_wind_sensitivity"],
-        )
-
-        if wind_max > 10:
-            adjustment -= (wind_max - 10) * disc_golf_wind_sensitivity * 0.3
-
-    return adjustment
+    return adjusted_predictions
 
 
-def get_base_rule_score(prediction):
-    base_score = clean_number(prediction.get("base_predicted_score"))
+def build_user_prediction_row(user_id, prediction, location):
+    activity = clean_value(prediction.get("activity"))
+    date_value = clean_value(prediction.get("date"))
 
-    if base_score is not None:
-        return base_score
-
-    rule_score = clean_number(prediction.get("rule_score"))
-
-    if rule_score is not None:
-        return rule_score
+    location_context = build_location_context(location)
+    saved_location_id = location.get("id") if location is not None else None
+    location_name = location.get("name") if location is not None else None
 
     predicted_score = clean_number(prediction.get("predicted_score"))
-
-    if predicted_score is not None:
-        return predicted_score
-
-    return 50
-
-
-def compute_planning_score(final_score, prediction):
+    planning_score = clean_number(prediction.get("planning_score"))
     forecast_confidence = clean_number(prediction.get("forecast_confidence"))
 
-    if forecast_confidence is not None:
-        return round((final_score * 0.80) + (forecast_confidence * 0.20))
-
-    existing_planning_score = clean_number(prediction.get("planning_score"))
-
-    if existing_planning_score is not None:
-        return existing_planning_score
-
-    return final_score
-
-
-def build_user_prediction_row(
-    user_id,
-    prediction,
-    preferences,
-    activity_default_lookup,
-    time_lookup,
-):
-    activity = prediction.get("activity")
-    date = prediction.get("date")
-
-    default_location = activity_default_lookup.get(activity)
-
-    if default_location is not None:
-        saved_location_id = default_location.get("id")
-        location_name = default_location.get("name")
-        location_context = build_location_context(default_location)
-    else:
-        saved_location_id = None
-        location_name = None
-        location_context = None
-
-    rule_score = get_base_rule_score(prediction)
-    preference_adjustment = calculate_preference_adjustment(prediction, preferences)
-
-    final_score = round(clamp_score(rule_score + preference_adjustment))
-    planning_score = compute_planning_score(final_score, prediction)
-    forecast_confidence = clean_number(prediction.get("forecast_confidence"))
-
-    recommended_window, window_score = get_time_recommendation(
-        time_lookup,
-        date,
-        activity,
-    )
+    avg_temp = clean_number(prediction.get("avg_temp"))
+    wind_max = clean_number(prediction.get("wind_max"))
+    gust_max = clean_number(prediction.get("gust_max"))
+    rain_chance = clean_number(prediction.get("rain_chance"))
+    bug_index = clean_number(prediction.get("bug_index"))
+    water_temp_est = clean_number(prediction.get("water_temp_est"))
 
     weather_snapshot = {
-        "avg_temp": prediction.get("avg_temp"),
-        "wind_max": prediction.get("wind_max"),
-        "gust_max": prediction.get("gust_max"),
-        "rain_chance": prediction.get("rain_chance"),
-        "bug_index": prediction.get("bug_index"),
-        "storm_risk": prediction.get("storm_risk"),
-        "water_temp_est": prediction.get("water_temp_est"),
+        "avg_temp": avg_temp,
+        "wind_max": wind_max,
+        "gust_max": gust_max,
+        "rain_chance": rain_chance,
+        "bug_index": bug_index,
+        "storm_risk": clean_value(prediction.get("storm_risk")),
+        "water_temp_est": water_temp_est,
     }
 
+    rule_score = clean_number(prediction.get("base_predicted_score"))
+
+    if rule_score is None:
+        rule_score = predicted_score
+
     feature_json = {
-        "source_prediction_id": prediction.get("id"),
-        "base_activity": activity,
+        "source": "direct_user_location_forecast",
+        "activity": activity,
+        "date": date_value,
         "weather_snapshot": weather_snapshot,
-        "user_preferences": preferences,
-        "preference_adjustment": preference_adjustment,
-        "base_rule_score": rule_score,
-        "default_location": location_context,
-        "time_window_source": "forecast_cache",
+        "location_context": location_context,
     }
 
     data_quality_json = {
-        "prediction_source": "prediction_history",
-        "scoring_pipeline": "v4_1_user_preferences_locations_windows",
+        "prediction_source": "github_actions_direct_location_forecast_v1",
+        "default_location_used": saved_location_id is not None,
+        "forecast_days_requested": FORECAST_DAYS,
+        "planning_window": "tomorrow_through_14_days",
         "ml_used": False,
-        "default_location_used": default_location is not None,
-        "time_window_used": recommended_window is not None,
     }
 
-    explanation = prediction.get("explanation") or ""
-
-    if preference_adjustment > 0:
-        explanation += f" Your saved preferences increased this score by {round(preference_adjustment)} points."
-    elif preference_adjustment < 0:
-        explanation += f" Your saved preferences decreased this score by {abs(round(preference_adjustment))} points."
-    else:
-        explanation += " Your saved preferences did not change this score."
-
-    if location_name:
-        explanation += f" Default location for this activity: {location_name}."
-
-    row = {
+    return {
         "user_id": user_id,
-        "date": date,
+        "date": date_value,
         "activity": activity,
 
-        "predicted_score": final_score,
-        "planning_score": planning_score,
-        "forecast_confidence": forecast_confidence,
-        "forecast_confidence_label": prediction.get("forecast_confidence_label"),
-        "label": score_label(final_score),
+        "predicted_score": None if predicted_score is None else round(predicted_score),
+        "planning_score": None if planning_score is None else round(planning_score),
+        "forecast_confidence": None if forecast_confidence is None else round(forecast_confidence),
+        "forecast_confidence_label": clean_value(prediction.get("forecast_confidence_label")),
+        "label": clean_value(prediction.get("label")),
 
-        "recommended_window": recommended_window,
-        "window_score": window_score,
+        "recommended_window": None,
+        "window_score": None,
 
         "saved_location_id": saved_location_id,
         "location_name": location_name,
-        "location_context": location_context,
+        "location_context": clean_value(location_context),
 
-        "explanation": explanation,
-        "gear_notes": prediction.get("gear_notes"),
+        "explanation": clean_value(prediction.get("explanation")),
+        "gear_notes": clean_value(prediction.get("gear_notes")),
 
-        "weather_snapshot": weather_snapshot,
-        "species_breakdown": prediction.get("species_breakdown"),
-        "best_species": prediction.get("best_species"),
+        "weather_snapshot": clean_value(weather_snapshot),
+        "species_breakdown": clean_value(prediction.get("species_breakdown")),
+        "best_species": clean_value(prediction.get("best_species")),
         "best_species_score": clean_number(prediction.get("best_species_score")),
 
         "rule_score": rule_score,
         "ml_score": None,
-        "final_score": final_score,
-        "scoring_method": "rules_plus_preferences_locations_windows_ml_ready_v4_1",
+        "final_score": None if predicted_score is None else round(predicted_score),
+        "scoring_method": "direct_user_location_rules_preferences_v1",
         "model_version": "none",
-        "feature_json": feature_json,
-        "data_quality_json": data_quality_json,
-        "prediction_source": "github_actions_v4_1",
+        "feature_json": clean_value(feature_json),
+        "data_quality_json": clean_value(data_quality_json),
+        "prediction_source": "github_actions_direct_user_location_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
 
         "ml_status": "no_model_available",
         "ml_weight": 0,
         "rule_weight": 1,
-        "blended_score": final_score,
-        "model_input_json": {
-            "activity": activity,
-            "date": date,
-            "weather": weather_snapshot,
-            "user_preferences": preferences,
-            "default_location": location_context,
-            "recommended_window": recommended_window,
-            "rule_score": rule_score,
-            "preference_adjustment": preference_adjustment,
-            "forecast_confidence": forecast_confidence,
-        },
+        "blended_score": None if predicted_score is None else round(predicted_score),
+        "model_input_json": clean_value(
+            {
+                "activity": activity,
+                "date": date_value,
+                "weather": weather_snapshot,
+                "location": location_context,
+                "rule_score": rule_score,
+                "forecast_confidence": forecast_confidence,
+            }
+        ),
         "model_explanation": (
-            "No ML model applied yet. Using rule-based score with user preferences, "
-            "default location context, and cached time window."
+            "No ML model applied yet. Using direct forecast scoring with "
+            "user preferences and saved/default location context."
         ),
     }
 
-    return row
+
+def log_pipeline_run(
+    supabase,
+    status,
+    users_processed=0,
+    predictions_written=0,
+    error_message=None,
+):
+    row = {
+        "run_source": "github_actions_direct_user_location_v1",
+        "status": status,
+        "users_processed": users_processed,
+        "predictions_written": predictions_written,
+        "error_message": error_message,
+    }
+
+    supabase.table("prediction_pipeline_runs").insert(row).execute()
+
+
+def build_location_plan(saved_locations, activity_default_lookup):
+    """
+    Returns list of:
+    [
+      {
+        "location": location,
+        "activities": set([...]) or None for fallback-all
+      }
+    ]
+
+    Fallback location generates all activities not covered by explicit defaults.
+    Explicit activity defaults override fallback rows.
+    """
+
+    home_location = find_home_location(saved_locations)
+    first_location = find_first_valid_location(saved_locations)
+    fallback_location = home_location or first_location
+
+    plan = []
+
+    if fallback_location is not None:
+        plan.append(
+            {
+                "location": fallback_location,
+                "activities": None,
+                "role": "fallback",
+            }
+        )
+
+    for activity, location in activity_default_lookup.items():
+        plan.append(
+            {
+                "location": location,
+                "activities": {activity},
+                "role": "activity_default",
+            }
+        )
+
+    return plan
 
 
 def main():
-    print("Starting user prediction generation pipeline v4.1...")
+    print("Starting direct user-location prediction generation...")
 
     supabase = get_supabase_client()
 
+    users_processed = 0
+    total_written = 0
+
     try:
         users = load_users(supabase)
-        prediction_history = load_prediction_history(supabase)
-        time_lookup = load_latest_time_recommendations(supabase)
-
         print(f"Users found: {len(users)}")
-        print(f"Prediction history rows found: {len(prediction_history)}")
-        print(f"Time recommendation dates found: {len(time_lookup)}")
-
-        if len(users) == 0 or len(prediction_history) == 0:
-            log_pipeline_run(
-                supabase,
-                status="completed_no_future_prediction_history_v4_1",
-                users_processed=len(users),
-                predictions_written=0,
-                error_message=(
-                    "No prediction_history rows found in the planning window "
-                    "from tomorrow through 14 days ahead."
-                ),
-            )
-            return
-
-        total_written = 0
 
         for user in users:
             user_id = get_user_id(user)
@@ -640,9 +497,16 @@ def main():
             if not user_id:
                 continue
 
+            users_processed += 1
+            print(f"Processing user {user_id}")
+
             preferences = load_user_preferences(supabase, user_id)
             saved_locations = load_user_saved_locations(supabase, user_id)
             activity_defaults = load_user_activity_location_defaults(supabase, user_id)
+
+            if len(saved_locations) == 0:
+                print(f"User {user_id} has no saved locations. Skipping.")
+                continue
 
             location_lookup = build_location_lookup(saved_locations)
             activity_default_lookup = build_activity_default_lookup(
@@ -650,31 +514,60 @@ def main():
                 location_lookup,
             )
 
-            rows_to_upsert = []
+            plan = build_location_plan(saved_locations, activity_default_lookup)
 
-            start_date, end_date = get_planning_date_window()
+            if len(plan) == 0:
+                print(f"User {user_id} has no valid forecast locations. Skipping.")
+                continue
 
-            for prediction in prediction_history:
-                prediction_date = prediction.get("date")
-                prediction_activity = prediction.get("activity")
+            rows_by_key = {}
+            explicitly_defaulted_activities = set(activity_default_lookup.keys())
 
-                if not prediction_date or not prediction_activity:
+            forecast_cache_by_location_key = {}
+
+            for plan_item in plan:
+                location = plan_item["location"]
+                activities = plan_item["activities"]
+                role = plan_item["role"]
+
+                key = location_key(location)
+
+                if key not in forecast_cache_by_location_key:
+                    forecast_cache_by_location_key[key] = generate_predictions_for_location(
+                        location=location,
+                        preferences=preferences,
+                    )
+
+                predictions = forecast_cache_by_location_key[key]
+
+                if len(predictions) == 0:
                     continue
 
-                if prediction_date < start_date or prediction_date > end_date:
-                    continue
+                for _, prediction in predictions.iterrows():
+                    activity = prediction.get("activity")
+                    date_value = prediction.get("date")
 
-                rows_to_upsert.append(
-                    build_user_prediction_row(
+                    if not activity or not date_value:
+                        continue
+
+                    if role == "fallback" and activity in explicitly_defaulted_activities:
+                        continue
+
+                    if activities is not None and activity not in activities:
+                        continue
+
+                    row = build_user_prediction_row(
                         user_id=user_id,
                         prediction=prediction,
-                        preferences=preferences,
-                        activity_default_lookup=activity_default_lookup,
-                        time_lookup=time_lookup,
+                        location=location,
                     )
-                )
+
+                    rows_by_key[(row["date"], row["activity"])] = row
+
+            rows_to_upsert = list(rows_by_key.values())
 
             if len(rows_to_upsert) == 0:
+                print(f"No prediction rows generated for user {user_id}.")
                 continue
 
             (
@@ -693,13 +586,15 @@ def main():
 
         log_pipeline_run(
             supabase,
-            status="completed_v4_1",
-            users_processed=len(users),
+            status="completed_direct_user_location_v1",
+            users_processed=users_processed,
             predictions_written=total_written,
             error_message=None,
         )
 
-        print("User prediction generation v4.1 complete.")
+        print("Direct user-location prediction generation complete.")
+        print(f"Users processed: {users_processed}")
+        print(f"Predictions written: {total_written}")
 
     except Exception as error:
         print(f"Pipeline failed: {error}")
@@ -707,9 +602,9 @@ def main():
         try:
             log_pipeline_run(
                 supabase,
-                status="failed_v4_1",
-                users_processed=0,
-                predictions_written=0,
+                status="failed_direct_user_location_v1",
+                users_processed=users_processed,
+                predictions_written=total_written,
                 error_message=str(error),
             )
         except Exception:
