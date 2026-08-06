@@ -1,0 +1,68 @@
+name: Generate Prediction History
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 */3 * * *" # every 3 hours, before user predictions
+
+  push:
+    branches:
+      - main
+    paths:
+      - "jobs/generate_prediction_history.py"
+      - ".github/workflows/generate_prediction_history.yml"
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pandas requests streamlit supabase
+
+      - name: Check required secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORECAST_LATITUDE: ${{ secrets.FORECAST_LATITUDE }}
+          FORECAST_LONGITUDE: ${{ secrets.FORECAST_LONGITUDE }}
+        run: |
+          python - <<'PY'
+          import os
+
+          required = [
+              "SUPABASE_URL",
+              "SUPABASE_KEY",
+              "FORECAST_LATITUDE",
+              "FORECAST_LONGITUDE",
+          ]
+
+          missing = [key for key in required if not os.environ.get(key)]
+
+          if missing:
+              raise SystemExit(f"Missing required secrets: {missing}")
+
+          print("Required secrets are present.")
+          print("SUPABASE_URL starts with:", os.environ["SUPABASE_URL"][:25])
+          print("Forecast location:", os.environ["FORECAST_LATITUDE"], os.environ["FORECAST_LONGITUDE"])
+          PY
+
+      - name: Generate prediction history
+        run: python jobs/generate_prediction_history.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORECAST_LATITUDE: ${{ secrets.FORECAST_LATITUDE }}
+          FORECAST_LONGITUDE: ${{ secrets.FORECAST_LONGITUDE }}
+          FORECAST_DAYS: "15"
+          FORECAST_INCLUDE_AIR_QUALITY: "true"

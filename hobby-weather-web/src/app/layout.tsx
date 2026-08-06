@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hobby Weather Planner",
-  description: "Plan outdoor activities with weather-based recommendations.",
+  title: "Lumora",
+  description:
+    "Lumora helps you find the best outdoor activity windows as conditions change.",
 };
 
 export default function RootLayout({

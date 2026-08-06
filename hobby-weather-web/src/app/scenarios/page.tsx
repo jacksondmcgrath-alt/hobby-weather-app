@@ -620,7 +620,7 @@ export default function ScenariosPage() {
     <>
       <PageHeader
         title="Scenarios"
-        description="Rate hypothetical activity conditions to help train future scoring models."
+        description="Rate hypothetical conditions to help Lumora learn what good activity windows look like."
       />
 
       <Card className="mt-8 relative overflow-hidden">

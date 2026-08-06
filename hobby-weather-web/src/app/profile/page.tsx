@@ -224,7 +224,7 @@ export default function ProfilePage() {
                   type="text"
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="What should Hobby Weather call you?"
+                  placeholder="What should Lumora call you?"
                   className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
                   required
                 />
@@ -329,7 +329,7 @@ export default function ProfilePage() {
 
           <div className="mt-5 grid gap-3 text-sm text-slate-300">
             <p>
-              Hobby Weather uses your saved data to personalize planning
+              Lumora uses your saved data to personalize planning
               recommendations and improve activity scores over time.
             </p>
 

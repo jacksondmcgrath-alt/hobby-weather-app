@@ -485,7 +485,7 @@ export default function Home() {
       <div className="mx-auto max-w-4xl">
           <header>
             <h1 className="text-3xl font-bold">
-              🌤️ Hobby Weather Planner
+              Lumora
             </h1>
 
             <p className="mt-2 text-slate-300">
@@ -547,7 +547,7 @@ export default function Home() {
                     type="text"
                     value={signupName}
                     onChange={(event) => setSignupName(event.target.value)}
-                    placeholder="What should Hobby Weather call you?"
+                    placeholder="What should Lumora call you?"
                     className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
                     required
                   />
@@ -639,7 +639,7 @@ export default function Home() {
           </h1>
 
           <p className="mt-2 max-w-3xl text-slate-300">
-            Here’s what Hobby Weather thinks is worth your attention next.
+            Here’s what Lumora thinks is worth your attention next.
           </p>
         </div>
 
@@ -773,7 +773,7 @@ export default function Home() {
         ) : (
           <EmptyState
             title="No recommendation ready yet"
-            description="Add a saved location, set activity defaults, or rate a few scenarios so Hobby Weather can start giving better suggestions."
+            description="Add a saved location, set activity defaults, or rate a few scenarios so Lumora can start giving better suggestions."
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 <Link
@@ -825,7 +825,7 @@ export default function Home() {
         <Card>
           <SectionTitle
             title="Next best setup steps"
-            description="These help Hobby Weather personalize your recommendations."
+            description="These help Lumora personalize your recommendations."
           />
 
           <div className="mt-5 grid gap-3">
@@ -1061,7 +1061,7 @@ function RecommendationCalendarLink({
         prediction.activity ?? "activity",
         prediction.date ?? "date"
       )}
-      className="rounded-lg bg-slate-700 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-slate-600"
+      className="rounded-lg bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
     >
       Add to calendar
     </a>

@@ -119,14 +119,14 @@ export function Button({
 }) {
   const styles = {
     primary:
-      "bg-sky-500 text-white shadow-lg shadow-sky-950/30 hover:bg-sky-400",
+        "bg-[rgb(var(--brand-rgb))] text-[#030716] shadow-lg shadow-[rgb(var(--brand-rgb)_/_0.22)] hover:bg-[rgb(var(--brand-soft-rgb))]",
     secondary:
-      "bg-slate-700 text-white hover:bg-slate-600",
+        "bg-slate-800 text-white hover:bg-slate-700",
     danger:
-      "bg-red-600 text-white shadow-lg shadow-red-950/20 hover:bg-red-500",
+        "bg-red-600 text-white shadow-lg shadow-red-950/20 hover:bg-red-500",
     ghost:
-      "bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white",
-  };
+        "bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white",
+    };
 
   const sizes = {
     sm: "px-3 py-1.5 text-sm",
@@ -175,7 +175,7 @@ export function Badge({
 }) {
   const styles = {
     good: "bg-green-600 text-white",
-    info: "bg-sky-500 text-white",
+    info: "bg-[rgb(var(--brand-rgb))] text-[#030716]",
     warning: "bg-amber-500 text-slate-950",
     danger: "bg-red-600 text-white",
     neutral: "bg-slate-700 text-slate-200",
@@ -209,7 +209,7 @@ export function ScoreBadge({
       styles = "bg-green-500 text-slate-950";
       defaultLabel = "Great";
     } else if (numericScore >= 65) {
-      styles = "bg-sky-500 text-white";
+      styles = "bg-[rgb(var(--brand-rgb))] text-[#030716]";
       defaultLabel = "Good";
     } else if (numericScore >= 50) {
       styles = "bg-amber-400 text-slate-950";

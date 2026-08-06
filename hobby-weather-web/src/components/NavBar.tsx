@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useUser } from "@/lib/useUser";
+import Image from "next/image";
 
 const USER_NAV_ITEMS = [
   { href: "/", label: "Home" },
@@ -68,17 +69,24 @@ export function NavBar() {
             href="/"
             className="group flex min-w-0 shrink-0 items-center gap-2 rounded-xl px-1 py-1"
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[rgb(var(--season-rgb)_/_0.30)] bg-[rgb(var(--season-rgb)_/_0.10)] text-xs font-black tracking-tight text-white shadow-[0_0_16px_rgb(var(--season-rgb)_/_0.12)] transition group-hover:bg-[rgb(var(--season-rgb)_/_0.16)]">
-              HW
+            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-xl shadow-[0_0_18px_rgb(var(--brand-warm-rgb)_/_0.18)]">
+              <Image
+                src="/lumora-logo.png"
+                alt="Lumora logo"
+                fill
+                sizes="36px"
+                className="object-cover"
+                priority
+              />
             </div>
 
             <div className="min-w-0 leading-tight">
               <div className="truncate text-sm font-bold tracking-tight text-white transition group-hover:text-[rgb(var(--season-soft-rgb))]">
-                Hobby Weather
+                Lumora
               </div>
 
               <div className="hidden text-[11px] text-slate-400 sm:block">
-                Forecasts for better plans
+                Know when conditions line up
               </div>
             </div>
           </Link>

@@ -306,7 +306,7 @@ export default function LogsPage() {
       <PageHeader
         eyebrow="Feedback"
         title="Activity Logs"
-        description="Tell Hobby Weather how your activities actually went so future recommendations can get smarter."
+        description="Tell Lumora how your activities actually went so future recommendations can get smarter."
       />
 
       <Card className="mt-8 relative overflow-hidden">
@@ -431,7 +431,7 @@ export default function LogsPage() {
       <Card className="mt-8">
         <SectionTitle
           title="Recent activity feedback"
-          description="These logs help Hobby Weather understand what actually worked for you."
+          description="These logs help Lumora understand what actually worked for you."
         />
 
         {logsLoading && (
