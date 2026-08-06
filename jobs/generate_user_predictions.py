@@ -47,7 +47,7 @@ DEFAULT_PREFERENCES = {
 }
 
 FORECAST_DAYS = 15
-PLANNING_START_DAYS = 1
+PLANNING_START_DAYS = 0
 PLANNING_HORIZON_DAYS = 14
 
 
@@ -59,6 +59,12 @@ def get_supabase_client():
 
 
 def get_planning_date_window():
+    """
+    Generate today through 14 days ahead.
+
+    Home can use today's recommendation.
+    Planner still filters to tomorrow through 14 days.
+    """
     start_date = date.today() + timedelta(days=PLANNING_START_DAYS)
     end_date = date.today() + timedelta(days=PLANNING_HORIZON_DAYS)
 
@@ -377,7 +383,7 @@ def build_user_prediction_row(user_id, prediction, location):
         "prediction_source": "github_actions_direct_location_forecast_v1",
         "default_location_used": saved_location_id is not None,
         "forecast_days_requested": FORECAST_DAYS,
-        "planning_window": "tomorrow_through_14_days",
+        "prediction_window": "today_through_14_days",
         "ml_used": False,
     }
 
