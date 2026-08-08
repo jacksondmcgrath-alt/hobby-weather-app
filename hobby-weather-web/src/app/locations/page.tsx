@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { trackEvent } from "@/lib/trackEvent";
 import { PageHeader, Card, StatusMessage } from "@/components/ui";
+import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 
 type SavedLocation = {
   id: number;
@@ -245,6 +246,20 @@ export default function LocationsPage() {
     return parsed;
   }
 
+  async function refreshPredictionsAfterLocationChange(reason: string) {
+    try {
+      await triggerPredictionGeneration({
+        force: true,
+        reason,
+      });
+
+      return true;
+    } catch (error) {
+      console.warn("Could not refresh predictions after location change:", error);
+      return false;
+    }
+  }
+
   async function handleSaveLocation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -306,7 +321,7 @@ export default function LocationsPage() {
       wind_exposure: windExposure,
     });
 
-    setSaveMessage("Location saved.");
+    setSaveMessage("Location saved. Lumora is updating your recommendations...");
 
     setName("");
     setLatitude("");
@@ -330,6 +345,19 @@ export default function LocationsPage() {
     await loadLocations();
 
     setSaving(false);
+    try {
+      await triggerPredictionGeneration({
+        force: true,
+        reason: "location_saved",
+      });
+
+      setSaveMessage("Location saved. Recommendations updated.");
+    } catch (error) {
+      console.warn("Could not update predictions after saving location:", error);
+      setSaveMessage(
+        "Location saved. Recommendations will update automatically soon."
+      );
+    }
   }
 
   function startEditing(location: SavedLocation) {
@@ -442,10 +470,20 @@ export default function LocationsPage() {
       water_type: editWaterType,
     });
 
-    setEditMessage("Location updated.");
+    setEditMessage("Location updated. Lumora is updating your recommendations...");
     setEditingId(null);
 
     await loadLocations();
+
+    const refreshed = await refreshPredictionsAfterLocationChange(
+      "location_updated"
+    );
+
+    setEditMessage(
+      refreshed
+        ? "Location updated. Recommendations updated."
+        : "Location updated. Recommendations will update automatically soon."
+    );
 
     setWorkingId(null);
   }
@@ -482,7 +520,20 @@ export default function LocationsPage() {
       location_id: locationId,
     });
 
+    setDeleteError("");
+    setEditMessage("Location deleted. Lumora is updating your recommendations...");
+
     await loadLocations();
+
+    const refreshed = await refreshPredictionsAfterLocationChange(
+      "location_deleted"
+    );
+
+    setEditMessage(
+      refreshed
+        ? "Location deleted. Recommendations updated."
+        : "Location deleted. Recommendations will update automatically soon."
+    );
 
     setWorkingId(null);
   }

@@ -7,6 +7,7 @@ import { useUser } from "@/lib/useUser";
 import { ACTIVITY_OPTIONS, activityLabel } from "@/lib/activityMeta";
 import { trackEvent } from "@/lib/trackEvent";
 import { PageHeader, Card, StatusMessage } from "@/components/ui";
+import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 
 type SavedLocation = {
   id: number;
@@ -26,7 +27,6 @@ export default function ActivityDefaultsPage() {
   const { user, authLoading } = useUser();
 
   const [locations, setLocations] = useState<SavedLocation[]>([]);
-
   const [selectedDefaults, setSelectedDefaults] = useState<Record<string, string>>(
     {}
   );
@@ -83,22 +83,20 @@ export default function ActivityDefaultsPage() {
 
     if (defaultError) {
       setErrorMessage(defaultError.message);
-      setLocations(locationData ?? []);
+      setLocations((locationData ?? []) as unknown as SavedLocation[]);
       setLoading(false);
       return;
     }
 
-    const loadedLocations = locationData ?? [];
-    const loadedDefaults = defaultData ?? [];
+    const loadedLocations = (locationData ?? []) as unknown as SavedLocation[];
+    const loadedDefaults = (defaultData ?? []) as unknown as ActivityDefault[];
 
     setLocations(loadedLocations);
 
     const defaultMap: Record<string, string> = {};
 
     for (const activity of ACTIVITY_OPTIONS) {
-      const match = loadedDefaults.find(
-        (item) => item.activity === activity
-      );
+      const match = loadedDefaults.find((item) => item.activity === activity);
 
       defaultMap[activity] =
         match?.saved_location_id !== null &&
@@ -121,7 +119,9 @@ export default function ActivityDefaultsPage() {
 
     if (!location) return "Unknown location";
 
-    return `${location.name ?? "Unnamed location"} (${location.location_type ?? "Location"})`;
+    return `${location.name ?? "Unnamed location"} (${
+      location.location_type ?? "Location"
+    })`;
   }
 
   function updateSelectedDefault(activity: string, locationId: string) {
@@ -129,6 +129,20 @@ export default function ActivityDefaultsPage() {
       ...current,
       [activity]: locationId,
     }));
+  }
+
+  async function refreshPredictionsAfterDefaultChange(reason: string) {
+    try {
+      await triggerPredictionGeneration({
+        force: true,
+        reason,
+      });
+
+      return true;
+    } catch (error) {
+      console.warn("Could not refresh predictions after default change:", error);
+      return false;
+    }
   }
 
   async function saveDefault(activity: string) {
@@ -157,24 +171,36 @@ export default function ActivityDefaultsPage() {
         activity,
       });
 
-      setMessage(`Removed default location for ${activity}.`);
+      setMessage(
+        `Removed default location for ${activity}. Updating recommendations...`
+      );
+
       await loadData();
+
+      const refreshed = await refreshPredictionsAfterDefaultChange(
+        "activity_default_removed"
+      );
+
+      setMessage(
+        refreshed
+          ? `Removed default location for ${activity}. Recommendations updated.`
+          : `Removed default location for ${activity}. Recommendations will update automatically soon.`
+      );
+
       setWorkingActivity(null);
       return;
     }
 
-    const { error } = await supabase
-      .from("activity_location_defaults")
-      .upsert(
-        {
-          user_id: user.id,
-          activity,
-          saved_location_id: Number(savedLocationId),
-        },
-        {
-          onConflict: "user_id,activity",
-        }
-      );
+    const { error } = await supabase.from("activity_location_defaults").upsert(
+      {
+        user_id: user.id,
+        activity,
+        saved_location_id: Number(savedLocationId),
+      },
+      {
+        onConflict: "user_id,activity",
+      }
+    );
 
     if (error) {
       setErrorMessage(error.message);
@@ -187,8 +213,20 @@ export default function ActivityDefaultsPage() {
       saved_location_id: savedLocationId,
     });
 
-    setMessage(`Saved default location for ${activity}.`);
+    setMessage(`Saved default location for ${activity}. Updating recommendations...`);
+
     await loadData();
+
+    const refreshed = await refreshPredictionsAfterDefaultChange(
+      "activity_default_saved"
+    );
+
+    setMessage(
+      refreshed
+        ? `Saved default location for ${activity}. Recommendations updated.`
+        : `Saved default location for ${activity}. Recommendations will update automatically soon.`
+    );
+
     setWorkingActivity(null);
   }
 
@@ -217,9 +255,20 @@ export default function ActivityDefaultsPage() {
       activity,
     });
 
-    setMessage(`Cleared default location for ${activity}.`);
+    setMessage(`Cleared default location for ${activity}. Updating recommendations...`);
 
     await loadData();
+
+    const refreshed = await refreshPredictionsAfterDefaultChange(
+      "activity_default_cleared"
+    );
+
+    setMessage(
+      refreshed
+        ? `Cleared default location for ${activity}. Recommendations updated.`
+        : `Cleared default location for ${activity}. Recommendations will update automatically soon.`
+    );
+
     setWorkingActivity(null);
   }
 
@@ -229,21 +278,21 @@ export default function ActivityDefaultsPage() {
 
   if (!user) {
     return (
-        <>
+      <>
         <PageHeader title="Activity Defaults" />
 
         <Card className="mt-6">
-            <p className="text-slate-300">
+          <p className="text-slate-300">
             Please log in to manage activity defaults.
-            </p>
+          </p>
         </Card>
-        </>
+      </>
     );
   }
 
   return (
     <>
-        <PageHeader
+      <PageHeader
         title="Activity Defaults"
         description="Choose which saved location should be used by default for each activity."
       />
@@ -265,20 +314,11 @@ export default function ActivityDefaultsPage() {
       )}
 
       <section className="mt-8 grid gap-4 sm:grid-cols-3">
-        <SummaryCard
-          label="Activities"
-          value={ACTIVITY_OPTIONS.length}
-        />
+        <SummaryCard label="Activities" value={ACTIVITY_OPTIONS.length} />
 
-        <SummaryCard
-          label="Configured"
-          value={configuredCount}
-        />
+        <SummaryCard label="Configured" value={configuredCount} />
 
-        <SummaryCard
-          label="Missing"
-          value={missingCount}
-        />
+        <SummaryCard label="Missing" value={missingCount} />
       </section>
 
       {locations.length === 0 ? (

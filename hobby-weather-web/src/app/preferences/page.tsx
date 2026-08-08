@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { trackEvent } from "@/lib/trackEvent";
 import { PageHeader, Card, StatusMessage } from "@/components/ui";
+import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 
 type PreferenceSettings = {
   bug_tolerance: number;
@@ -137,8 +138,21 @@ export default function PreferencesPage() {
       preferences,
     });
 
-    setSaveMessage("Preferences saved.");
+    setSaveMessage("Preferences saved. Lumora is updating your recommendations...");
     setSaving(false);
+    try {
+      await triggerPredictionGeneration({
+        force: true,
+        reason: "preferences_saved",
+      });
+
+      setSaveMessage("Preferences saved. Recommendations updated.");
+    } catch (error) {
+      console.warn("Could not update predictions after saving preferences:", error);
+      setSaveMessage(
+        "Preferences saved. Recommendations will update automatically soon."
+      );
+    }
   }
 
   function resetPreferences() {

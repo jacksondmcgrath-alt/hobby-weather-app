@@ -30,6 +30,7 @@ import {
   Badge,
   Panel,
 } from "@/components/ui";
+import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 
 
 type DashboardCounts = {
@@ -127,12 +128,18 @@ export default function Home() {
   const [latestPipelineRun, setLatestPipelineRun] = useState<PipelineRun | null>(null);
 
   useEffect(() => {
-  if (!user) {
-    setProfile(null);
-    return;
-  }
+    console.log("Home user effect fired:", {
+      authLoading,
+      hasUser: Boolean(user),
+      userId: user?.id,
+    });
 
-  const currentUser = user;
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+
+    const currentUser = user;
 
   async function loadUserHome() {
     try {
@@ -141,6 +148,19 @@ export default function Home() {
     } catch (error) {
       console.error("Could not load profile:", error);
       setProfile(null);
+    }
+
+    try {
+      console.log("Checking whether predictions need refresh...");
+
+      const result = await triggerPredictionGeneration({
+        force: false,
+        reason: "home_opened",
+      });
+
+      console.log("Prediction generation result:", result);
+    } catch (error) {
+      console.warn("Could not refresh predictions on home open:", error);
     }
 
     await loadDashboard(currentUser);
