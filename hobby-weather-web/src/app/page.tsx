@@ -31,7 +31,7 @@ import {
   Panel,
 } from "@/components/ui";
 import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
-
+import { buildLumoraTake } from "@/lib/recommendationText";
 
 type DashboardCounts = {
   savedLocations: number;
@@ -620,6 +620,23 @@ export default function Home() {
     );
   }
 
+  {profile && profile.onboarding_complete === false && (
+    <Card className="mt-8">
+      <SectionTitle
+        title="Finish setting up Lumora"
+        description="Add your home location and choose activities so Lumora can generate better recommendations."
+        action={
+          <Link
+            href="/onboarding"
+            className="rounded-lg bg-[rgb(var(--brand-rgb))] px-4 py-2 text-sm font-semibold text-[#030716] transition hover:bg-[rgb(var(--brand-soft-rgb))]"
+          >
+            Continue setup
+          </Link>
+        }
+      />
+    </Card>
+  )}
+
   const scenarioProgress = Math.min(
     counts.scenarioRatings / SCENARIO_TOTAL_GOAL,
     1
@@ -744,17 +761,42 @@ export default function Home() {
                     </div>
                   )}
 
-                {topRecommendation.explanation && (
-                  <Panel className="mt-5">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Why this recommendation
-                    </div>
+                <Panel className="mt-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Lumora’s take
+                  </div>
 
-                    <p className="mt-2 text-sm leading-6 text-slate-300">
-                      {topRecommendation.explanation}
-                    </p>
-                  </Panel>
-                )}
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    {buildLumoraTake({
+                      activity: activityLabel(topRecommendation.activity),
+                      date: topRecommendation.date,
+                      score:
+                        topRecommendation.planning_score ??
+                        topRecommendation.predicted_score,
+                      label: topRecommendation.label,
+                      recommendedWindow: "Suggested time TBD",
+                      forecastConfidenceLabel: topRecommendation.forecast_confidence_label,
+                      avgTemp: topRecommendation.avg_temp,
+                      windMax: topRecommendation.wind_max,
+                      rainChance: topRecommendation.rain_chance,
+                      bugIndex: topRecommendation.bug_index,
+                      waterTempEst: topRecommendation.water_temp_est,
+                      locationName: null,
+                    })}
+                  </p>
+
+                  {topRecommendation.explanation && (
+                    <details className="mt-3 text-sm text-slate-400">
+                      <summary className="cursor-pointer font-semibold text-slate-300">
+                        Original scoring explanation
+                      </summary>
+
+                      <p className="mt-2 leading-6">
+                        {topRecommendation.explanation}
+                      </p>
+                    </details>
+                  )}
+                </Panel>
               </div>
 
               <div className="grid min-w-48 gap-2">
@@ -984,26 +1026,6 @@ export default function Home() {
     </>
   );
   }
-
-  function DashboardCard({
-    label,
-    value,
-    href,
-  }: {
-    label: string;
-    value: number;
-    href: string;
-  }) {
-    return (
-      <Link
-        href={href}
-        className="rounded-2xl bg-slate-900 p-5 shadow hover:bg-slate-800"
-      >
-        <div className="text-3xl font-bold">{value}</div>
-        <div className="mt-1 text-sm text-slate-300">{label}</div>
-      </Link>
-    );
-}
 
 function QuickAction({
   href,

@@ -135,6 +135,23 @@ export default function LogsPage() {
 
     const actualScore = actualEnjoyment * 10;
 
+    const { data: matchingPredictionData } = await supabase
+      .from("user_predictions")
+      .select("weather_snapshot,location_context,feature_json")
+      .eq("user_id", user.id)
+      .eq("date", date)
+      .eq("activity", activity)
+      .limit(1)
+      .maybeSingle();
+
+    const matchingPrediction = matchingPredictionData as unknown as {
+      weather_snapshot?: Record<string, unknown> | null;
+      location_context?: Record<string, unknown> | null;
+      feature_json?: {
+        preferences?: Record<string, unknown>;
+      } | null;
+    } | null;
+
     const { error } = await supabase
       .from("activity_logs")
       .insert({
@@ -149,6 +166,9 @@ export default function LogsPage() {
         absolute_error: null,
         did_i_go: didIGo,
         notes,
+        weather_snapshot: matchingPrediction?.weather_snapshot ?? null,
+        location_context: matchingPrediction?.location_context ?? null,
+        preference_snapshot: matchingPrediction?.feature_json?.preferences ?? null,
       });
 
     if (error) {

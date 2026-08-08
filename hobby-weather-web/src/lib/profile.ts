@@ -4,6 +4,8 @@ import { supabase } from "@/lib/supabaseClient";
 export type UserProfile = {
   user_id: string;
   display_name: string | null;
+  onboarding_complete: boolean | null;
+  onboarding_completed_at: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -74,7 +76,7 @@ export async function getOrCreateProfile(
 ) {
   const { data: existingProfile, error: selectError } = await supabase
     .from("profiles")
-    .select("user_id,display_name,created_at,updated_at")
+    .select("user_id,display_name,onboarding_complete,onboarding_completed_at,created_at,updated_at")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -95,7 +97,7 @@ export async function getOrCreateProfile(
       user_id: user.id,
       display_name: displayName,
     })
-    .select("user_id,display_name,created_at,updated_at")
+    .select("user_id,display_name,onboarding_complete,onboarding_completed_at,created_at,updated_at")
     .single();
 
   if (insertError) {

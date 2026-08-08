@@ -435,6 +435,23 @@ export default function PlansPage() {
       absoluteError = Math.abs(predictionError);
     }
 
+    const { data: matchingPredictionData } = await supabase
+      .from("user_predictions")
+      .select("weather_snapshot,location_context,feature_json")
+      .eq("user_id", user.id)
+      .eq("date", plan.planned_date)
+      .eq("activity", plan.activity)
+      .limit(1)
+      .maybeSingle();
+
+    const matchingPrediction = matchingPredictionData as unknown as {
+      weather_snapshot?: Record<string, unknown> | null;
+      location_context?: Record<string, unknown> | null;
+      feature_json?: {
+        preferences?: Record<string, unknown>;
+      } | null;
+    } | null;
+
     const { error: logErrorResponse } = await supabase
       .from("activity_logs")
       .insert({
@@ -452,6 +469,9 @@ export default function PlansPage() {
         absolute_error: absoluteError,
         did_i_go: logDidIGo,
         notes: logNotes,
+        weather_snapshot: matchingPrediction?.weather_snapshot ?? null,
+        location_context: matchingPrediction?.location_context ?? null,
+        preference_snapshot: matchingPrediction?.feature_json?.preferences ?? null,
       });
 
     if (logErrorResponse) {
