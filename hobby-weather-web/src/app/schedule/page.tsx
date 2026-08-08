@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { trackEvent } from "@/lib/trackEvent";
 import { PageHeader, Card, StatusMessage } from "@/components/ui";
+import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 
 type WeeklyObligation = {
   id: number;
@@ -107,6 +108,20 @@ export default function SchedulePage() {
     setLoading(false);
   }
 
+  async function refreshPredictionsAfterScheduleChange(reason: string) {
+    try {
+      await triggerPredictionGeneration({
+        force: true,
+        reason,
+      });
+
+      return true;
+    } catch (error) {
+      console.warn("Could not refresh predictions after schedule change:", error);
+      return false;
+    }
+  }
+
   async function saveObligation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -154,9 +169,19 @@ export default function SchedulePage() {
     setStartTime("08:00");
     setEndTime("17:00");
 
-    setMessage("Schedule block saved.");
+    setMessage("Schedule block saved. Lumora is updating your recommendations...");
 
     await loadObligations();
+
+    const refreshed = await refreshPredictionsAfterScheduleChange(
+      "weekly_obligation_created"
+    );
+
+    setMessage(
+      refreshed
+        ? "Schedule block saved. Recommendations updated."
+        : "Schedule block saved. Recommendations will update automatically soon."
+    );
 
     setSaving(false);
   }
@@ -193,8 +218,20 @@ export default function SchedulePage() {
       end_time: "17:00",
     });
 
-    setMessage("Workweek preset added.");
+    setMessage("Workweek preset added. Lumora is updating your recommendations...");
+
     await loadObligations();
+
+    const refreshed = await refreshPredictionsAfterScheduleChange(
+      "workweek_preset_added"
+    );
+
+    setMessage(
+      refreshed
+        ? "Workweek preset added. Recommendations updated."
+        : "Workweek preset added. Recommendations will update automatically soon."
+    );
+
     setSaving(false);
   }
 
@@ -258,10 +295,21 @@ export default function SchedulePage() {
       active: editActive,
     });
 
-    setMessage("Schedule block updated.");
+    setMessage("Schedule block updated. Lumora is updating your recommendations...");
     setEditingId(null);
 
     await loadObligations();
+
+    const refreshed = await refreshPredictionsAfterScheduleChange(
+      "weekly_obligation_updated"
+    );
+
+    setMessage(
+      refreshed
+        ? "Schedule block updated. Recommendations updated."
+        : "Schedule block updated. Recommendations will update automatically soon."
+    );
+
     setWorkingId(null);
   }
 
@@ -290,7 +338,20 @@ export default function SchedulePage() {
       active: obligation.active === false,
     });
 
+    setMessage("Schedule block changed. Lumora is updating your recommendations...");
+
     await loadObligations();
+
+    const refreshed = await refreshPredictionsAfterScheduleChange(
+      "weekly_obligation_toggled"
+    );
+
+    setMessage(
+      refreshed
+        ? "Schedule block changed. Recommendations updated."
+        : "Schedule block changed. Recommendations will update automatically soon."
+    );
+
     setWorkingId(null);
   }
 
@@ -322,7 +383,20 @@ export default function SchedulePage() {
       obligation_id: id,
     });
 
+    setMessage("Schedule block deleted. Lumora is updating your recommendations...");
+
     await loadObligations();
+
+    const refreshed = await refreshPredictionsAfterScheduleChange(
+      "weekly_obligation_deleted"
+    );
+
+    setMessage(
+      refreshed
+        ? "Schedule block deleted. Recommendations updated."
+        : "Schedule block deleted. Recommendations will update automatically soon."
+    );
+
     setWorkingId(null);
   }
 

@@ -64,18 +64,30 @@ type PlannedActivity = {
   planned_window: string | null;
 };
 
+type WeeklyObligation = {
+  id: number;
+  label: string | null;
+  day_of_week: number | null;
+  start_time: string | null;
+  end_time: string | null;
+  active: boolean | null;
+};
+
 export default function PlannerPage() {
   const { user, authLoading } = useUser();
 
   const [predictions, setPredictions] = useState<PredictionRow[]>([]);
   const [plans, setPlans] = useState<PlannedActivity[]>([]);
+  const [obligations, setObligations] = useState<WeeklyObligation[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedActivity, setSelectedActivity] = useState("");
-  const [plannerView, setPlannerView] = useState<"day" | "activity">("day");
+  const [plannerView, setPlannerView] = useState<"day" | "activity" | "calendar">(
+    "day"
+  );
 
   const [planMessage, setPlanMessage] = useState("");
   const [planError, setPlanError] = useState("");
@@ -86,6 +98,7 @@ export default function PlannerPage() {
     if (!user) {
       setPredictions([]);
       setPlans([]);
+      setObligations([]);
       return;
     }
 
@@ -286,6 +299,23 @@ export default function PlannerPage() {
     }
 
     setPlans((plansData ?? []) as unknown as PlannedActivity[]);
+
+    const { data: obligationsData, error: obligationsError } = await supabase
+      .from("weekly_obligations")
+      .select("id,label,day_of_week,start_time,end_time,active")
+      .eq("user_id", user.id)
+      .eq("active", true)
+      .order("day_of_week", { ascending: true })
+      .order("start_time", { ascending: true });
+
+    if (obligationsError) {
+      setErrorMessage(obligationsError.message);
+      setLoading(false);
+      return;
+    }
+
+    setObligations((obligationsData ?? []) as unknown as WeeklyObligation[]);
+
     setLoading(false);
   }
 
@@ -547,6 +577,19 @@ export default function PlannerPage() {
                 >
                     By activity
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPlannerView("calendar")}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                    plannerView === "calendar"
+                      ? "bg-[rgb(var(--brand-rgb)_/_0.18)] text-white"
+                      : "text-slate-300 hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  Calendar
+                </button>
+
                 </div>
             </div>
 
@@ -647,11 +690,72 @@ export default function PlannerPage() {
                 </div>
                 </div>
             )}
+
+            {plannerView === "calendar" && (
+              <div className="mt-6">
+                <WeeklyPlannerCalendar
+                  predictions={predictions}
+                  plans={plans}
+                  obligations={obligations}
+                  savingPlanKey={savingPlanKey}
+                  planAlreadyExists={planAlreadyExists}
+                  getRecommendedWindow={getRecommendedWindow}
+                  buildDescription={buildDescription}
+                  onSavePlan={saveAsPlanned}
+                />
+              </div>
+            )}
             </Card>
         </section>
         )}
     </>
   );
+}
+
+function addDaysToDateString(dateString: string, days: number) {
+  const date = new Date(`${dateString}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getPlanningDatesForWeek(weekIndex: 0 | 1) {
+  const startOffset = weekIndex === 0 ? 1 : 8;
+
+  return Array.from({ length: 7 }, (_item, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() + startOffset + index);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+function getCalendarWeekLabel(weekIndex: 0 | 1) {
+  return weekIndex === 0 ? "Next 7 days" : "Following 7 days";
+}
+
+function getAppDayOfWeek(dateString: string) {
+  const date = new Date(`${dateString}T12:00:00`);
+  const jsDay = date.getDay(); // Sunday = 0
+
+  // Your app schedule uses Monday = 0, Sunday = 6
+  return jsDay === 0 ? 6 : jsDay - 1;
+}
+
+function formatCalendarDate(dateString: string) {
+  const date = new Date(`${dateString}T12:00:00`);
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatTimeRange(start: string | null, end: string | null) {
+  if (!start || !end) {
+    return "Time unavailable";
+  }
+
+  return `${start}–${end}`;
 }
 
 function PredictionCard({
@@ -687,7 +791,8 @@ function PredictionCard({
   const displayScore = prediction.planning_score ?? prediction.predicted_score;
 
   return (
-    <Panel className="transition hover:border-[rgb(var(--season-rgb)_/_0.35)]">
+    <Panel className="relative overflow-hidden border-[rgb(var(--brand-warm-rgb)_/_0.18)] transition hover:border-[rgb(var(--brand-warm-rgb)_/_0.38)] hover:bg-[rgb(var(--brand-warm-rgb)_/_0.04)]">
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-[rgb(var(--brand-warm-rgb)_/_0.75)]" />
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -816,6 +921,489 @@ function PredictionCard({
   );
 }
 
+function WeeklyPlannerCalendar({
+  predictions,
+  plans,
+  obligations,
+  savingPlanKey,
+  planAlreadyExists,
+  getRecommendedWindow,
+  buildDescription,
+  onSavePlan,
+}: {
+  predictions: PredictionRow[];
+  plans: PlannedActivity[];
+  obligations: WeeklyObligation[];
+  savingPlanKey: string | null;
+  planAlreadyExists: (prediction: PredictionRow) => boolean;
+  getRecommendedWindow: (prediction: PredictionRow) => string;
+  buildDescription: (prediction: PredictionRow, windowText: string) => string;
+  onSavePlan: (prediction: PredictionRow) => void;
+}) {
+  const [weekIndex, setWeekIndex] = useState<0 | 1>(0);
+  const calendarDates = getPlanningDatesForWeek(weekIndex);
+  const [selectedMobileDate, setSelectedMobileDate] = useState(calendarDates[0]);
+  const bestWeeklyPrediction = predictions
+    .filter((prediction) => calendarDates.includes(prediction.date ?? ""))
+    .filter((prediction) => {
+      const windowText = getRecommendedWindow(prediction);
+      return !windowText.includes("No clear open window");
+    })
+    .sort(
+      (a, b) =>
+        (b.planning_score ?? b.predicted_score ?? 0) -
+        (a.planning_score ?? a.predicted_score ?? 0)
+    )[0] ?? null;
+
+  useEffect(() => {
+    setSelectedMobileDate(calendarDates[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekIndex]);
+
+  function getDayData(date: string) {
+    const dayOfWeek = getAppDayOfWeek(date);
+
+    const dayObligations = obligations.filter(
+      (item) => item.day_of_week === dayOfWeek
+    );
+
+    const dayPlans = plans.filter((plan) => plan.planned_date === date);
+
+    const dayPredictions = predictions
+      .filter((prediction) => prediction.date === date)
+      .sort(
+        (a, b) =>
+          (b.planning_score ?? b.predicted_score ?? 0) -
+          (a.planning_score ?? a.predicted_score ?? 0)
+      )
+      .slice(0, 2);
+
+    return {
+      dayObligations,
+      dayPlans,
+      dayPredictions,
+    };
+  }
+
+  const selectedDayData = getDayData(selectedMobileDate);
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-white">
+            Calendar
+          </h3>
+
+          <p className="mt-1 text-sm text-slate-300">
+            See saved plans, unavailable times, and Lumora’s top suggestions in one place.
+          </p>
+        </div>
+
+        <div className="inline-flex rounded-xl border border-slate-700 bg-slate-950/60 p-1">
+          <button
+            type="button"
+            onClick={() => setWeekIndex(0)}
+            className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+              weekIndex === 0
+                ? "bg-[rgb(var(--brand-rgb)_/_0.18)] text-white"
+                : "text-slate-300 hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            Next 7
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setWeekIndex(1)}
+            className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+              weekIndex === 1
+                ? "bg-[rgb(var(--brand-rgb)_/_0.18)] text-white"
+                : "text-slate-300 hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            Following 7
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+        {getCalendarWeekLabel(weekIndex)}
+      </div>
+
+      {bestWeeklyPrediction && (
+        <div className="mb-4 rounded-2xl border border-[rgb(var(--brand-warm-rgb)_/_0.28)] bg-[rgb(var(--brand-warm-rgb)_/_0.08)] p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.2em] text-[rgb(var(--brand-warm-soft-rgb))]">
+                Best window this week
+              </div>
+
+              <div className="mt-2 text-lg font-semibold text-white">
+                {activityLabel(bestWeeklyPrediction.activity)}
+              </div>
+
+              <div className="mt-1 text-sm text-slate-300">
+                {formatCalendarDate(bestWeeklyPrediction.date ?? "")} ·{" "}
+                {getRecommendedWindow(bestWeeklyPrediction)}
+              </div>
+
+              {bestWeeklyPrediction.location_name && (
+                <div className="mt-1 text-sm text-slate-400">
+                  {bestWeeklyPrediction.location_name}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-full bg-[rgb(var(--brand-warm-rgb)_/_0.18)] px-3 py-1 text-sm font-bold text-white">
+                {bestWeeklyPrediction.planning_score ??
+                  bestWeeklyPrediction.predicted_score ??
+                  "?"}
+              </div>
+
+              <span className="rounded-full bg-white/5 px-3 py-1 text-xs font-bold text-slate-200">
+                {bestWeeklyPrediction.label ?? "Recommendation"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile layout */}
+      <div className="lg:hidden">
+        <div className="flex gap-2 overflow-x-auto pb-3">
+          {calendarDates.map((date) => {
+            const { dayObligations, dayPlans, dayPredictions } = getDayData(date);
+            const selected = selectedMobileDate === date;
+
+            return (
+              <button
+                key={date}
+                type="button"
+                onClick={() => setSelectedMobileDate(date)}
+                className={`shrink-0 rounded-2xl border px-3 py-2 text-left transition ${
+                  selected
+                    ? "border-[rgb(var(--brand-warm-rgb)_/_0.45)] bg-[rgb(var(--brand-warm-rgb)_/_0.12)] text-white"
+                    : "border-slate-800 bg-slate-950/50 text-slate-300 hover:bg-white/5"
+                }`}
+              >
+                <div className="text-sm font-bold">
+                  {formatCalendarDate(date)}
+                </div>
+
+                <div className="mt-1 text-xs text-slate-500">
+                  {dayPredictions.length} suggestions
+                </div>
+
+                <div className="mt-2 flex gap-1">
+                  {dayObligations.length > 0 && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-orange-400" />
+                  )}
+
+                  {dayPlans.length > 0 && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+                  )}
+
+                  {dayPredictions.length > 0 && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-[rgb(var(--brand-warm-rgb))]" />
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <CalendarDayCard
+          date={selectedMobileDate}
+          dayObligations={selectedDayData.dayObligations}
+          dayPlans={selectedDayData.dayPlans}
+          dayPredictions={selectedDayData.dayPredictions}
+          savingPlanKey={savingPlanKey}
+          planAlreadyExists={planAlreadyExists}
+          getRecommendedWindow={getRecommendedWindow}
+          buildDescription={buildDescription}
+          onSavePlan={onSavePlan}
+          spacious
+        />
+      </div>
+
+      {/* Desktop layout */}
+      <div className="hidden gap-4 lg:grid lg:grid-cols-2 xl:grid-cols-7">
+        {calendarDates.map((date) => {
+          const { dayObligations, dayPlans, dayPredictions } = getDayData(date);
+
+          return (
+            <CalendarDayCard
+              key={date}
+              date={date}
+              dayObligations={dayObligations}
+              dayPlans={dayPlans}
+              dayPredictions={dayPredictions}
+              savingPlanKey={savingPlanKey}
+              planAlreadyExists={planAlreadyExists}
+              getRecommendedWindow={getRecommendedWindow}
+              buildDescription={buildDescription}
+              onSavePlan={onSavePlan}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CalendarDayCard({
+  date,
+  dayObligations,
+  dayPlans,
+  dayPredictions,
+  savingPlanKey,
+  planAlreadyExists,
+  getRecommendedWindow,
+  buildDescription,
+  onSavePlan,
+  spacious = false,
+}: {
+  date: string;
+  dayObligations: WeeklyObligation[];
+  dayPlans: PlannedActivity[];
+  dayPredictions: PredictionRow[];
+  savingPlanKey: string | null;
+  planAlreadyExists: (prediction: PredictionRow) => boolean;
+  getRecommendedWindow: (prediction: PredictionRow) => string;
+  buildDescription: (prediction: PredictionRow, windowText: string) => string;
+  onSavePlan: (prediction: PredictionRow) => void;
+  spacious?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border border-slate-800/80 bg-slate-950/55 ${
+        spacious ? "p-4" : "p-3 xl:p-4"
+      }`}
+    >
+      <div>
+        <div className="text-sm font-bold text-white">
+          {formatCalendarDate(date)}
+        </div>
+
+        <div className="mt-1 text-xs text-slate-500">
+          {date}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        {dayObligations.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                Busy
+              </div>
+
+              <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-[11px] font-bold text-orange-200">
+                {dayObligations.length}
+              </span>
+            </div>
+
+            <div className="grid gap-2">
+              {dayObligations.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-xl border border-orange-500/20 bg-orange-500/10 p-2 text-xs text-orange-100"
+                >
+                  <div className="font-semibold">
+                    {item.label ?? "Unavailable"}
+                  </div>
+
+                  <div className="mt-1 text-orange-200/80">
+                    {formatTimeRange(item.start_time, item.end_time)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {dayPlans.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                Plans
+              </div>
+
+              <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[11px] font-bold text-green-200">
+                {dayPlans.length}
+              </span>
+            </div>
+
+            <div className="grid gap-2">
+              {dayPlans.map((plan) => (
+                <div
+                  key={plan.id}
+                  className="rounded-xl border border-green-500/20 bg-green-500/10 p-2 text-xs text-green-100"
+                >
+                  <div className="font-semibold">
+                    {activityLabel(plan.activity)}
+                  </div>
+
+                  <div className="mt-1 text-green-200/80">
+                    {plan.planned_window || "No window"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              Suggestions
+            </div>
+
+            {dayPredictions.length > 0 && (
+              <span className="rounded-full bg-[rgb(var(--brand-warm-rgb)_/_0.10)] px-2 py-0.5 text-[11px] font-bold text-[rgb(var(--brand-warm-soft-rgb))]">
+                Top {dayPredictions.length}
+              </span>
+            )}
+          </div>
+
+          {dayPredictions.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              No suggestions for this day.
+            </p>
+          ) : (
+            <div className="grid gap-2">
+              {dayPredictions.map((prediction) => {
+                const windowText = getRecommendedWindow(prediction);
+                const key = `${prediction.date}-${prediction.activity}`;
+
+                return (
+                  <CalendarSuggestionCard
+                    key={key}
+                    prediction={prediction}
+                    windowText={windowText}
+                    description={buildDescription(prediction, windowText)}
+                    alreadyPlanned={planAlreadyExists(prediction)}
+                    saving={savingPlanKey === key}
+                    onSavePlan={() => onSavePlan(prediction)}
+                    dayObligations={dayObligations}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarSuggestionCard({
+  prediction,
+  windowText,
+  description,
+  alreadyPlanned,
+  saving,
+  onSavePlan,
+  dayObligations,
+}: {
+  prediction: PredictionRow;
+  windowText: string;
+  description: string;
+  alreadyPlanned: boolean;
+  saving: boolean;
+  onSavePlan: () => void;
+  dayObligations: WeeklyObligation[];
+}) {
+  const { start, end } = parseWindowToDates(
+    prediction.date ?? new Date().toISOString().slice(0, 10),
+    windowText
+  );
+
+  const icsText = createIcsEvent({
+    title: prediction.activity ?? "Activity",
+    start,
+    end,
+    description,
+    location: prediction.location_name ?? "",
+  });
+
+  const downloadHref = makeIcsDownloadHref(icsText);
+
+  const displayScore =
+    prediction.planning_score ?? prediction.predicted_score ?? null;
+
+  const windowConflict = getWindowConflicts(windowText, dayObligations);
+
+  return (
+    <div className="rounded-xl border border-[rgb(var(--brand-warm-rgb)_/_0.22)] bg-[rgb(var(--brand-warm-rgb)_/_0.06)] p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-white">
+            {activityLabel(prediction.activity)}
+          </div>
+
+          <div className="mt-1 text-xs text-slate-300">
+            {windowText}
+          </div>
+        </div>
+
+        <div className="rounded-full bg-[rgb(var(--brand-warm-rgb)_/_0.18)] px-2 py-1 text-xs font-bold text-white">
+          {displayScore ?? "?"}
+        </div>
+      </div>
+
+      <div className="mt-2 text-xs text-slate-400">
+        {prediction.avg_temp ?? "?"}°F · wind {prediction.wind_max ?? "?"} mph · rain{" "}
+        {prediction.rain_chance ?? "?"}%
+      </div>
+
+      <div className="mt-2">
+        {windowConflict.status === "open" && (
+          <span className="rounded-full bg-green-500/10 px-2 py-1 text-[11px] font-bold text-green-200">
+            Open · avoids schedule
+          </span>
+        )}
+
+        {windowConflict.status === "conflict" && (
+          <span className="rounded-full bg-orange-500/10 px-2 py-1 text-[11px] font-bold text-orange-200">
+            Conflicts with {windowConflict.conflicts[0]?.label ?? "schedule"}
+          </span>
+        )}
+
+        {windowConflict.status === "tbd" && (
+          <span className="rounded-full bg-slate-700/70 px-2 py-1 text-[11px] font-bold text-slate-300">
+            Time TBD
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        <button
+          type="button"
+          onClick={onSavePlan}
+          disabled={alreadyPlanned || saving}
+          className="rounded-lg bg-[rgb(var(--brand-rgb))] px-3 py-2 text-xs font-bold text-[#030716] transition hover:bg-[rgb(var(--brand-soft-rgb))] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {alreadyPlanned ? "Planned" : saving ? "Saving..." : "Save"}
+        </button>
+
+        <a
+          href={downloadHref}
+          download={calendarFilename(
+            prediction.activity ?? "activity",
+            prediction.date ?? "date"
+          )}
+          className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
+        >
+          Calendar
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function toDateString(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -874,4 +1462,96 @@ function formatFriendlyDate(dateString: string | null | undefined) {
     month: "short",
     day: "numeric",
   });
+}
+
+function parseTimeToMinutes(time: string | null) {
+  if (!time) return null;
+
+  const match = time.match(/^(\d{1,2}):(\d{2})/);
+
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+
+  return hours * 60 + minutes;
+}
+
+function parseWindowTextToMinutes(windowText: string) {
+  if (
+    !windowText ||
+    windowText.includes("TBD") ||
+    windowText.includes("Not available") ||
+    windowText.includes("No clear open window")
+  ) {
+    return null;
+  }
+
+  const normalized = windowText
+    .replace(/—/g, "–")
+    .replace(/ - /g, "–")
+    .replace(/-/g, "–");
+
+  const parts = normalized.split("–").map((part) => part.trim());
+
+  if (parts.length !== 2) return null;
+
+  function parseDisplayTime(text: string) {
+    const date = new Date(`2000-01-01 ${text}`);
+
+    if (Number.isNaN(date.getTime())) return null;
+
+    return date.getHours() * 60 + date.getMinutes();
+  }
+
+  const start = parseDisplayTime(parts[0]);
+  let end = parseDisplayTime(parts[1]);
+
+  if (start === null || end === null) return null;
+
+  if (end <= start) {
+    end += 24 * 60;
+  }
+
+  return { start, end };
+}
+
+function rangesOverlap(
+  first: { start: number; end: number },
+  second: { start: number; end: number }
+) {
+  return first.start < second.end && second.start < first.end;
+}
+
+function getWindowConflicts(
+  windowText: string,
+  obligations: WeeklyObligation[]
+) {
+  const parsedWindow = parseWindowTextToMinutes(windowText);
+
+  if (!parsedWindow) {
+    return {
+      status: "tbd" as const,
+      conflicts: [],
+    };
+  }
+
+  const conflicts = obligations.filter((item) => {
+    const start = parseTimeToMinutes(item.start_time);
+    const end = parseTimeToMinutes(item.end_time);
+
+    if (start === null || end === null) return false;
+
+    return rangesOverlap(parsedWindow, {
+      start,
+      end: end <= start ? end + 24 * 60 : end,
+    });
+  });
+
+  return {
+    status: conflicts.length > 0 ? ("conflict" as const) : ("open" as const),
+    conflicts,
+  };
 }

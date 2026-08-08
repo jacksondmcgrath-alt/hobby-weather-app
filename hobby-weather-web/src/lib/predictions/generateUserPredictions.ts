@@ -70,11 +70,37 @@ type DailyWeather = {
   bugIndex: number;
   stormSafety: number;
   waterTempEst: number;
+  hourlyRows: HourlyWeatherRow[];
 };
 
 type PredictionResult = {
   predictionsWritten: number;
   locationsUsed: number;
+};
+
+type WeeklyObligation = {
+  id: number;
+  label: string | null;
+  day_of_week: number | null;
+  start_time: string | null;
+  end_time: string | null;
+  active: boolean | null;
+};
+
+type HourlyWeatherRow = {
+  date: string;
+  hour: number;
+  temp: number;
+  humidity: number;
+  rainChance: number;
+  rain: number;
+  wind: number;
+  gust: number;
+  cloud: number;
+  pressure: number;
+  apparentTemp: number;
+  dewPoint: number;
+  uv: number;
 };
 
 function todayString() {
@@ -551,19 +577,20 @@ function aggregateDailyWeather(forecastData: any, airQualityData: any) {
     }
 
     buckets.get(date)?.push({
-      hour,
-      temp: Number(hourly.temperature_2m?.[index] ?? 60),
-      humidity: Number(hourly.relative_humidity_2m?.[index] ?? 50),
-      rainChance: Number(hourly.precipitation_probability?.[index] ?? 0),
-      rain: Number(hourly.precipitation?.[index] ?? 0),
-      wind: Number(hourly.wind_speed_10m?.[index] ?? 0),
-      gust: Number(hourly.wind_gusts_10m?.[index] ?? 0),
-      cloud: Number(hourly.cloud_cover?.[index] ?? 50),
-      pressure: Number(hourly.pressure_msl?.[index] ?? 1015),
-      apparentTemp: Number(hourly.apparent_temperature?.[index] ?? 60),
-      dewPoint: Number(hourly.dew_point_2m?.[index] ?? 50),
-      uv: Number(hourly.uv_index?.[index] ?? 5),
-    });
+        date,
+        hour,
+        temp: Number(hourly.temperature_2m?.[index] ?? 60),
+        humidity: Number(hourly.relative_humidity_2m?.[index] ?? 50),
+        rainChance: Number(hourly.precipitation_probability?.[index] ?? 0),
+        rain: Number(hourly.precipitation?.[index] ?? 0),
+        wind: Number(hourly.wind_speed_10m?.[index] ?? 0),
+        gust: Number(hourly.wind_gusts_10m?.[index] ?? 0),
+        cloud: Number(hourly.cloud_cover?.[index] ?? 50),
+        pressure: Number(hourly.pressure_msl?.[index] ?? 1015),
+        apparentTemp: Number(hourly.apparent_temperature?.[index] ?? 60),
+        dewPoint: Number(hourly.dew_point_2m?.[index] ?? 50),
+        uv: Number(hourly.uv_index?.[index] ?? 5),
+        });
   }
 
   const aqiByDate = new Map<string, number[]>();
@@ -630,17 +657,18 @@ function aggregateDailyWeather(forecastData: any, airQualityData: any) {
     });
 
     days.push({
-      date,
-      ...dailyBase,
-      pressureChange,
-      bugIndex,
-      stormSafety,
-      waterTempEst: average([
-        dailyBase.avgTemp,
-        dailyBase.minTemp,
-        dailyBase.maxTemp,
-      ]),
-    });
+        date,
+        ...dailyBase,
+        pressureChange,
+        bugIndex,
+        stormSafety,
+        waterTempEst: average([
+            dailyBase.avgTemp,
+            dailyBase.minTemp,
+            dailyBase.maxTemp,
+        ]),
+        hourlyRows: rows as HourlyWeatherRow[],
+        });
   }
 
   return days.sort((a, b) => a.date.localeCompare(b.date));
@@ -692,6 +720,18 @@ async function loadActivityDefaults(admin: SupabaseAdmin, userId: string) {
   if (error) throw error;
 
   return (data ?? []) as ActivityDefault[];
+}
+
+async function loadWeeklyObligations(admin: SupabaseAdmin, userId: string) {
+  const { data, error } = await admin
+    .from("weekly_obligations")
+    .select("id,label,day_of_week,start_time,end_time,active")
+    .eq("user_id", userId)
+    .eq("active", true);
+
+  if (error) throw error;
+
+  return (data ?? []) as unknown as WeeklyObligation[];
 }
 
 function findHomeLocation(locations: SavedLocation[]) {
@@ -756,6 +796,382 @@ function buildActivityLocationMap(
   return map;
 }
 
+type CandidateWindow = {
+  label: string;
+  start: string;
+  end: string;
+  baseScore: number;
+};
+
+const BASE_WINDOWS: Record<string, CandidateWindow> = {
+  morning: {
+    label: "Morning",
+    start: "7:00 AM",
+    end: "10:00 AM",
+    baseScore: 70,
+  },
+  midday: {
+    label: "Midday",
+    start: "11:00 AM",
+    end: "2:00 PM",
+    baseScore: 65,
+  },
+  afternoon: {
+    label: "Afternoon",
+    start: "3:00 PM",
+    end: "6:00 PM",
+    baseScore: 70,
+  },
+  evening: {
+    label: "Evening",
+    start: "6:00 PM",
+    end: "9:00 PM",
+    baseScore: 75,
+  },
+};
+
+const ACTIVITY_WINDOW_PREFERENCES: Record<string, string[]> = {
+  Fishing: ["morning", "evening", "afternoon", "midday"],
+  Running: ["morning", "evening", "afternoon", "midday"],
+  Kayaking: ["midday", "afternoon", "morning", "evening"],
+  "Disc Golf": ["morning", "afternoon", "evening", "midday"],
+  Tennis: ["morning", "evening", "afternoon", "midday"],
+  "Beach Day": ["midday", "afternoon", "morning", "evening"],
+  Camping: ["afternoon", "morning", "evening", "midday"],
+};
+
+function formatWindow(start: string, end: string) {
+  return `${start}–${end}`;
+}
+
+function parseClockTimeToMinutes(timeText: string | null) {
+  if (!timeText) return null;
+
+  const hhmmMatch = timeText.match(/^(\d{1,2}):(\d{2})$/);
+
+  if (hhmmMatch) {
+    const hours = Number(hhmmMatch[1]);
+    const minutes = Number(hhmmMatch[2]);
+
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+
+    return hours * 60 + minutes;
+  }
+
+  const date = new Date(`2000-01-01 ${timeText}`);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function rangesOverlap(
+  first: { start: number; end: number },
+  second: { start: number; end: number }
+) {
+  return first.start < second.end && second.start < first.end;
+}
+
+function getAppDayOfWeek(dateString: string) {
+  const date = new Date(`${dateString}T12:00:00`);
+  const jsDay = date.getDay(); // Sunday = 0
+
+  // App schedule uses Monday = 0, Sunday = 6
+  return jsDay === 0 ? 6 : jsDay - 1;
+}
+
+function windowConflictsWithObligations({
+  date,
+  start,
+  end,
+  obligations,
+}: {
+  date: string;
+  start: string;
+  end: string;
+  obligations: WeeklyObligation[];
+}) {
+  const dayOfWeek = getAppDayOfWeek(date);
+
+  const windowStart = parseClockTimeToMinutes(start);
+  const windowEnd = parseClockTimeToMinutes(end);
+
+  if (windowStart === null || windowEnd === null) {
+    return true;
+  }
+
+  const normalizedWindow = {
+    start: windowStart,
+    end: windowEnd <= windowStart ? windowEnd + 24 * 60 : windowEnd,
+  };
+
+  const dayObligations = obligations.filter(
+    (item) => item.active !== false && item.day_of_week === dayOfWeek
+  );
+
+  return dayObligations.some((item) => {
+    const obligationStart = parseClockTimeToMinutes(item.start_time);
+    const obligationEnd = parseClockTimeToMinutes(item.end_time);
+
+    if (obligationStart === null || obligationEnd === null) {
+      return false;
+    }
+
+    return rangesOverlap(normalizedWindow, {
+      start: obligationStart,
+      end:
+        obligationEnd <= obligationStart
+          ? obligationEnd + 24 * 60
+          : obligationEnd,
+    });
+  });
+}
+
+function getHourlyRowsForWindow({
+  day,
+  start,
+  end,
+}: {
+  day: DailyWeather;
+  start: string;
+  end: string;
+}) {
+  const startMinutes = parseClockTimeToMinutes(start);
+  const endMinutes = parseClockTimeToMinutes(end);
+
+  if (startMinutes === null || endMinutes === null) {
+    return [];
+  }
+
+  const normalizedEnd =
+    endMinutes <= startMinutes ? endMinutes + 24 * 60 : endMinutes;
+
+  return day.hourlyRows.filter((row) => {
+    const rowMinutes = row.hour * 60;
+
+    return rowMinutes >= startMinutes && rowMinutes < normalizedEnd;
+  });
+}
+
+function scoreWindowWeatherForActivity({
+  activity,
+  day,
+  window,
+}: {
+  activity: string;
+  day: DailyWeather;
+  window: CandidateWindow;
+}) {
+  const rows = getHourlyRowsForWindow({
+    day,
+    start: window.start,
+    end: window.end,
+  });
+
+  if (rows.length === 0) {
+    return 40;
+  }
+
+  const avgTemp = average(rows.map((row) => row.temp));
+  const maxWind = max(rows.map((row) => row.wind));
+  const maxGust = max(rows.map((row) => row.gust));
+  const maxRainChance = max(rows.map((row) => row.rainChance));
+  const avgCloud = average(rows.map((row) => row.cloud));
+  const maxUv = max(rows.map((row) => row.uv));
+  const maxDewPoint = max(rows.map((row) => row.dewPoint));
+
+  if (activity === "Running") {
+    const tempScore = rangeScore(avgTemp, 45, 62, 25, 82);
+    const windScore = lowIsGoodScore(maxWind, 8, 22);
+    const rainScore = lowIsGoodScore(maxRainChance, 20, 75);
+    const dewScore = lowIsGoodScore(maxDewPoint, 58, 72);
+    const aqiScore = lowIsGoodScore(day.aqi, 50, 150);
+
+    return clampScore(
+      tempScore * 0.35 +
+        windScore * 0.18 +
+        rainScore * 0.17 +
+        dewScore * 0.12 +
+        aqiScore * 0.12 +
+        day.stormSafety * 0.06
+    );
+  }
+
+  if (activity === "Fishing") {
+    const tempScore = rangeScore(avgTemp, 50, 76, 35, 92);
+    const windScore =
+      maxWind < 4
+        ? 75
+        : maxWind <= 12
+          ? 100
+          : lowIsGoodScore(maxWind, 12, 26);
+    const rainScore = lowIsGoodScore(maxRainChance, 45, 90);
+    const waterScore = rangeScore(day.waterTempEst, 55, 72, 40, 84);
+    const bugScore = rangeScore(day.bugIndex, 35, 75, 10, 95);
+
+    return clampScore(
+      tempScore * 0.18 +
+        windScore * 0.24 +
+        rainScore * 0.12 +
+        waterScore * 0.22 +
+        bugScore * 0.12 +
+        day.stormSafety * 0.12
+    );
+  }
+
+  if (activity === "Kayaking") {
+    const tempScore = rangeScore(avgTemp, 65, 85, 50, 95);
+    const windScore = lowIsGoodScore(maxWind, 8, 20);
+    const gustScore = lowIsGoodScore(maxGust, 15, 32);
+    const rainScore = lowIsGoodScore(maxRainChance, 20, 75);
+    const waterScore = rangeScore(day.waterTempEst, 60, 78, 45, 88);
+
+    return clampScore(
+      tempScore * 0.18 +
+        windScore * 0.28 +
+        gustScore * 0.18 +
+        rainScore * 0.12 +
+        waterScore * 0.14 +
+        day.stormSafety * 0.1
+    );
+  }
+
+  if (activity === "Disc Golf") {
+    const tempScore = rangeScore(avgTemp, 50, 78, 35, 92);
+    const windScore = lowIsGoodScore(maxWind, 10, 25);
+    const rainScore = lowIsGoodScore(maxRainChance, 25, 80);
+    const cloudScore = lowIsGoodScore(avgCloud, 35, 95);
+
+    return clampScore(
+      tempScore * 0.34 +
+        windScore * 0.28 +
+        rainScore * 0.2 +
+        cloudScore * 0.06 +
+        day.stormSafety * 0.12
+    );
+  }
+
+  if (activity === "Tennis") {
+    const tempScore = rangeScore(avgTemp, 55, 78, 40, 95);
+    const windScore = lowIsGoodScore(maxWind, 10, 24);
+    const rainScore = lowIsGoodScore(maxRainChance, 15, 70);
+
+    return clampScore(
+      tempScore * 0.4 +
+        windScore * 0.26 +
+        rainScore * 0.22 +
+        day.stormSafety * 0.12
+    );
+  }
+
+  if (activity === "Beach Day") {
+    const tempScore = rangeScore(avgTemp, 75, 90, 60, 100);
+    const rainScore = lowIsGoodScore(maxRainChance, 20, 80);
+    const windScore = lowIsGoodScore(maxWind, 16, 32);
+    const uvScore = rangeScore(maxUv, 3, 8, 0, 11);
+    const waterScore = rangeScore(day.waterTempEst, 68, 82, 55, 90);
+
+    return clampScore(
+      tempScore * 0.32 +
+        rainScore * 0.2 +
+        windScore * 0.14 +
+        uvScore * 0.12 +
+        waterScore * 0.12 +
+        day.stormSafety * 0.1
+    );
+  }
+
+  if (activity === "Camping") {
+    const tempScore = rangeScore(avgTemp, 65, 82, 45, 95);
+    const rainScore = lowIsGoodScore(maxRainChance, 20, 75);
+    const bugComfort = lowIsGoodScore(day.bugIndex, 30, 85);
+
+    return clampScore(
+      tempScore * 0.38 +
+        rainScore * 0.24 +
+        bugComfort * 0.18 +
+        day.stormSafety * 0.2
+    );
+  }
+
+  return clampScore(day.stormSafety * 0.4 + window.baseScore * 0.6);
+}
+
+function getRecommendedWindowForActivity({
+  activity,
+  date,
+  day,
+  obligations,
+}: {
+  activity: string;
+  date: string;
+  day: DailyWeather;
+  obligations: WeeklyObligation[];
+}) {
+  const preferenceKeys =
+    ACTIVITY_WINDOW_PREFERENCES[activity] ?? [
+      "morning",
+      "afternoon",
+      "evening",
+      "midday",
+    ];
+
+  const candidates = preferenceKeys
+    .map((key, index) => {
+      const baseWindow = BASE_WINDOWS[key];
+
+      if (!baseWindow) return null;
+
+      const weatherScore = scoreWindowWeatherForActivity({
+        activity,
+        day,
+        window: baseWindow,
+      });
+
+      const preferenceBonus = (preferenceKeys.length - index) * 4;
+
+      return {
+        ...baseWindow,
+        preferenceRank: index,
+        weatherScore,
+        score: clampScore(weatherScore * 0.82 + preferenceBonus),
+      };
+    })
+    .filter(
+      (
+        item
+      ): item is CandidateWindow & {
+        preferenceRank: number;
+        weatherScore: number;
+        score: number;
+      } => item !== null
+    );
+
+  const openCandidates = candidates.filter(
+    (candidate) =>
+      !windowConflictsWithObligations({
+        date,
+        start: candidate.start,
+        end: candidate.end,
+        obligations,
+      })
+  );
+
+  if (openCandidates.length === 0) {
+    return {
+      recommendedWindow: "No clear open window",
+      windowScore: 0,
+    };
+  }
+
+  const best = openCandidates.sort((a, b) => b.score - a.score)[0];
+
+  return {
+    recommendedWindow: formatWindow(best.start, best.end),
+    windowScore: best.score,
+  };
+}
+
 export async function generateUserPredictionsNow({
   admin,
   userId,
@@ -766,6 +1182,7 @@ export async function generateUserPredictionsNow({
   const preferences = await loadPreferences(admin, userId);
   const locations = await loadSavedLocations(admin, userId);
   const defaults = await loadActivityDefaults(admin, userId);
+  const obligations = await loadWeeklyObligations(admin, userId);
 
   if (locations.length === 0) {
     return {
@@ -821,6 +1238,12 @@ export async function generateUserPredictionsNow({
       const predictedScore = clampScore(base.score + adjustment);
       const confidence = forecastConfidence(day.date, day);
       const planningScore = clampScore(predictedScore * 0.8 + confidence * 0.2);
+      const windowRecommendation = getRecommendedWindowForActivity({
+        activity,
+        date: day.date,
+        day,
+        obligations,
+        });
 
       const weatherSnapshot = {
         avg_temp: Math.round(day.avgTemp),
@@ -852,6 +1275,12 @@ export async function generateUserPredictionsNow({
         explanation += ` Location used: ${location.name}.`;
       }
 
+      if (windowRecommendation.windowScore > 0) {
+        explanation += ` Suggested window: ${windowRecommendation.recommendedWindow}.`;
+        } else {
+        explanation += " No clear open window was found around your saved schedule.";
+      }
+
       rows.push({
         user_id: userId,
         date: day.date,
@@ -863,8 +1292,8 @@ export async function generateUserPredictionsNow({
         forecast_confidence_label: forecastConfidenceLabel(confidence),
         label: scoreLabel(predictedScore),
 
-        recommended_window: null,
-        window_score: null,
+        recommended_window: windowRecommendation.recommendedWindow,
+        window_score: windowRecommendation.windowScore,
 
         saved_location_id: location.id,
         location_name: location.name,
@@ -881,7 +1310,7 @@ export async function generateUserPredictionsNow({
         rule_score: base.score,
         ml_score: null,
         final_score: predictedScore,
-        scoring_method: "typescript_direct_user_location_basic_v1",
+        scoring_method: "typescript_direct_user_location_hourly_windows_v2",
         model_version: "none",
         feature_json: {
           source: "typescript_api_route",
@@ -890,12 +1319,14 @@ export async function generateUserPredictionsNow({
           location_context: locationContext(location),
         },
         data_quality_json: {
-          prediction_source: "typescript_direct_user_location_basic_v1",
+          prediction_source: "typescript_api_route_hourly_windows_v2",
           prediction_window: "today_through_14_days",
           default_location_used: true,
+          schedule_aware_window_used: true,
+          window_scoring_version: "hourly_windows_v2",
           ml_used: false,
         },
-        prediction_source: "typescript_api_route_v1",
+        prediction_source: "typescript_direct_user_location_hourly_windows_v2",
         generated_at: new Date().toISOString(),
 
         ml_status: "no_model_available",

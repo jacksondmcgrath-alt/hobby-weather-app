@@ -4,7 +4,17 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
 import { trackEvent } from "@/lib/trackEvent";
-import { PageHeader, Card, StatusMessage } from "@/components/ui";
+import {
+  PageHeader,
+  Card,
+  StatusMessage,
+  SectionTitle,
+  Panel,
+  Button,
+  Badge,
+  EmptyState,
+  StatCard,
+} from "@/components/ui";
 import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 
 type SavedLocation = {
@@ -141,6 +151,20 @@ export default function LocationsPage() {
     loadLocations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  const waterLocationCount = locations.filter(
+    (location) =>
+      location.water_type &&
+      location.water_type !== "Not applicable"
+  ).length;
+
+  const usgsLocationCount = locations.filter(
+    (location) => location.use_usgs_water_data
+  ).length;
+
+  const ndbcLocationCount = locations.filter(
+    (location) => location.use_ndbc_data
+  ).length;
 
   async function loadLocations() {
     if (!user) {
@@ -344,7 +368,6 @@ export default function LocationsPage() {
 
     await loadLocations();
 
-    setSaving(false);
     try {
       await triggerPredictionGeneration({
         force: true,
@@ -358,6 +381,8 @@ export default function LocationsPage() {
         "Location saved. Recommendations will update automatically soon."
       );
     }
+
+    setSaving(false);
   }
 
   function startEditing(location: SavedLocation) {
@@ -559,19 +584,52 @@ export default function LocationsPage() {
   return (
     <>
       <PageHeader
-        title="Saved Locations"
-        description="Add and manage places you use for running, fishing, kayaking, tennis, beach days, and more."
+        eyebrow="Forecast setup"
+        title="Locations"
+        description="Add the places Lumora should forecast for. Your saved and default locations are used to generate activity recommendations."
       />
 
+      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Saved locations"
+          value={locations.length}
+          hint="Places Lumora can forecast."
+        />
+
+        <StatCard
+          label="Water locations"
+          value={waterLocationCount}
+          hint="Useful for fishing, kayaking, and beach days."
+        />
+
+        <StatCard
+          label="USGS enabled"
+          value={usgsLocationCount}
+          hint="Live river/water observations."
+        />
+
+        <StatCard
+          label="Buoy enabled"
+          value={ndbcLocationCount}
+          hint="NOAA/NDBC water conditions."
+        />
+      </section>
+
+
       <Card className="mt-8">
-        <h2 className="text-xl font-semibold">Add Location</h2>
+        <SectionTitle
+          title="Add a forecast location"
+          description="Start with your home area or a place you commonly use for outdoor activities."
+        />
 
-        <div className="mt-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
-          <h3 className="font-semibold">Search for a location</h3>
+        <Panel className="mt-5">
+          <div className="flex flex-col gap-1">
+            <h3 className="font-semibold text-white">Search for a location</h3>
 
-          <p className="mt-1 text-sm text-slate-400">
-            Search by place name, address, coordinates, or a map link with coordinates.
-          </p>
+            <p className="text-sm text-slate-400">
+              Search by place name, address, coordinates, or a map link. Lumora will use the coordinates for forecast generation.
+            </p>
+          </div>
 
           <div className="mt-3 grid gap-3">
             <input
@@ -632,7 +690,7 @@ export default function LocationsPage() {
               </div>
             )}
           </div>
-        </div>
+        </Panel>
 
         <form onSubmit={handleSaveLocation} className="mt-4 grid gap-4">
           <label className="grid gap-1">
@@ -779,13 +837,9 @@ export default function LocationsPage() {
             />
           </label>
 
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
+          <Button type="submit" disabled={saving}>
             {saving ? "Saving..." : "Save location"}
-          </button>
+          </Button>
         </form>
 
         {saveMessage && (
@@ -802,7 +856,10 @@ export default function LocationsPage() {
       </Card>
 
       <Card className="mt-8">
-        <h2 className="text-xl font-semibold">Your Saved Locations</h2>
+        <SectionTitle
+          title="Your locations"
+          description="These are the places Lumora can use when generating recommendations."
+        />
 
         {loading && (
           <p className="mt-4 text-slate-300">Loading saved locations...</p>
@@ -833,17 +890,17 @@ export default function LocationsPage() {
         )}
 
         {!loading && !loadError && locations.length === 0 && (
-          <p className="mt-4 text-slate-300">
-            No saved locations yet.
-          </p>
+          <div className="mt-4">
+            <EmptyState
+              title="No saved locations yet"
+              description="Add your first location so Lumora can generate personalized forecasts and recommendations."
+            />
+          </div>
         )}
 
         <div className="mt-4 grid gap-3">
           {locations.map((location) => (
-            <div
-              key={location.id}
-              className="rounded-xl border border-slate-700 bg-slate-800 p-4"
-            >
+            <Panel key={location.id}>
               {editingId === location.id ? (
                 <EditLocationForm
                   locationId={location.id}
@@ -884,9 +941,28 @@ export default function LocationsPage() {
                       {location.name ?? "Unnamed location"}
                     </div>
 
-                    <div className="mt-1 text-sm text-slate-300">
-                      {location.location_type ?? "Unknown type"} ·{" "}
-                      {location.water_type ?? "Unknown water type"}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Badge variant="neutral">
+                        {location.location_type ?? "Unknown type"}
+                      </Badge>
+
+                      {location.water_type && location.water_type !== "Not applicable" && (
+                        <Badge variant="info">
+                          {location.water_type}
+                        </Badge>
+                      )}
+
+                      {location.use_usgs_water_data && (
+                        <Badge variant="good">
+                          USGS
+                        </Badge>
+                      )}
+
+                      {location.use_ndbc_data && (
+                        <Badge variant="info">
+                          NDBC
+                        </Badge>
+                      )}
                     </div>
 
                     <div className="mt-1 text-sm text-slate-400">
@@ -924,26 +1000,28 @@ export default function LocationsPage() {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => startEditing(location)}
-                      className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
                     >
                       Edit
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
                       type="button"
+                      variant="danger"
+                      size="sm"
                       onClick={() => handleDeleteLocation(location.id)}
                       disabled={workingId === location.id}
-                      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {workingId === location.id ? "Deleting..." : "Delete"}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
-            </div>
+            </Panel>
           ))}
         </div>
       </Card>
