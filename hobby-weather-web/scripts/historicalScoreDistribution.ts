@@ -229,18 +229,21 @@ function aggregateDailyWeather(historicalData: any) {
     });
 
     days.push({
-      date,
-      ...dailyBase,
-      pressureChange,
-      bugIndex,
-      stormSafety,
-      waterTempEst: average([
-        dailyBase.avgTemp,
-        dailyBase.minTemp,
-        dailyBase.maxTemp,
-      ]),
-      hourlyRows: rows,
-    });
+        date,
+        ...dailyBase,
+        pressureChange,
+        bugIndex,
+        stormSafety,
+        waterTempEst: average([
+            dailyBase.avgTemp,
+            dailyBase.minTemp,
+            dailyBase.maxTemp,
+        ]),
+        hourlyRows: rows,
+        sunrise: null,
+        sunset: null,
+        daylightHours: null,
+        });
   }
 
   return days.sort((a, b) => a.date.localeCompare(b.date));
