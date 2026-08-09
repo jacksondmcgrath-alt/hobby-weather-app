@@ -10,6 +10,7 @@ import Image from "next/image";
 const USER_NAV_ITEMS = [
   { href: "/", label: "Home" },
   { href: "/planner", label: "Planner" },
+  { href: "/explore", label: "Explore" },
   { href: "/plans", label: "Plans" },
   { href: "/logs", label: "Logs" },
   { href: "/scenarios", label: "Scenarios" },
@@ -69,7 +70,7 @@ export function NavBar() {
             href="/"
             className="group flex min-w-0 shrink-0 items-center gap-2 rounded-xl px-1 py-1"
           >
-            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-xl shadow-[0_0_18px_rgb(var(--brand-warm-rgb)_/_0.18)]">
+            <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl shadow-[0_0_18px_rgb(var(--brand-warm-rgb)_/_0.18)]">
               <Image
                 src="/lumora-logo.png"
                 alt="Lumora logo"
@@ -81,11 +82,11 @@ export function NavBar() {
             </div>
 
             <div className="min-w-0 leading-tight">
-              <div className="truncate text-sm font-bold tracking-tight text-white transition group-hover:text-[rgb(var(--season-soft-rgb))]">
+              <div className="truncate text-lg font-black tracking-tight text-white transition group-hover:text-[rgb(var(--brand-warm-soft-rgb))] sm:text-xl">
                 Lumora
               </div>
 
-              <div className="hidden text-[11px] text-slate-400 sm:block">
+              <div className="hidden text-xs font-medium text-slate-400 sm:block">
                 Know when conditions line up
               </div>
             </div>

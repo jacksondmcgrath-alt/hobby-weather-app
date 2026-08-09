@@ -22,6 +22,7 @@ import {
   Button,
   EmptyState,
 } from "@/components/ui";
+import { ForecastFreshness } from "@/components/ForecastFreshness";
 
 type PredictionRow = {
   date: string | null;
@@ -93,6 +94,9 @@ export default function PlannerPage() {
   const [planError, setPlanError] = useState("");
   const [savingPlanKey, setSavingPlanKey] = useState<string | null>(null);
   const planningRange = useMemo(() => getPlanningDateRange(), []);
+
+  const [latestPredictionGeneratedAt, setLatestPredictionGeneratedAt] =
+    useState<string | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -316,6 +320,8 @@ export default function PlannerPage() {
 
     setObligations((obligationsData ?? []) as unknown as WeeklyObligation[]);
 
+    await loadPredictionFreshness(user.id);
+
     setLoading(false);
   }
 
@@ -384,6 +390,28 @@ export default function PlannerPage() {
 
   function getRecommendedWindow(prediction: PredictionRow) {
     return prediction.recommended_window ?? "Suggested time TBD";
+  }
+
+  async function loadPredictionFreshness(userId: string) {
+    const { data, error } = await supabase
+      .from("user_predictions")
+      .select("generated_at")
+      .eq("user_id", userId)
+      .order("generated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("Could not load prediction freshness:", error.message);
+      setLatestPredictionGeneratedAt(null);
+      return;
+    }
+
+    const row = data as unknown as {
+      generated_at: string | null;
+    } | null;
+
+    setLatestPredictionGeneratedAt(row?.generated_at ?? null);
   }
 
   async function saveAsPlanned(prediction: PredictionRow) {
@@ -458,6 +486,10 @@ export default function PlannerPage() {
         title="Planner"
         description="Use cached personalized predictions to choose a day, choose an activity, save plans, and export calendar events."
         />
+
+        <div className="mt-4">
+          <ForecastFreshness generatedAt={latestPredictionGeneratedAt} />
+        </div>
 
       {loading && (
         <p className="mt-6 text-slate-300">Loading cached predictions...</p>

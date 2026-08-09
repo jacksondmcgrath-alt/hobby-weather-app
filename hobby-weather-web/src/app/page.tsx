@@ -32,6 +32,7 @@ import {
 } from "@/components/ui";
 import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 import { buildLumoraTake } from "@/lib/recommendationText";
+import { ForecastFreshness } from "@/components/ForecastFreshness";
 
 type DashboardCounts = {
   savedLocations: number;
@@ -126,6 +127,8 @@ export default function Home() {
   const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
 
   const [latestPipelineRun, setLatestPipelineRun] = useState<PipelineRun | null>(null);
+  const [latestPredictionGeneratedAt, setLatestPredictionGeneratedAt] =
+    useState<string | null>(null);
 
   useEffect(() => {
     console.log("Home user effect fired:", {
@@ -169,6 +172,28 @@ export default function Home() {
     loadUserHome();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  async function loadPredictionFreshness(userId: string) {
+    const { data, error } = await supabase
+      .from("user_predictions")
+      .select("generated_at")
+      .eq("user_id", userId)
+      .order("generated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("Could not load prediction freshness:", error.message);
+      setLatestPredictionGeneratedAt(null);
+      return;
+    }
+
+    const row = data as unknown as {
+      generated_at: string | null;
+    } | null;
+
+    setLatestPredictionGeneratedAt(row?.generated_at ?? null);
+  }
 
   async function handleGoogleLogin() {
     setAuthMessage("");
@@ -249,6 +274,7 @@ export default function Home() {
     setRecentLogs([]);
     setTopRecommendation(null);
     setLatestPipelineRun(null);
+    setLatestPredictionGeneratedAt(null);
   }
 
   async function getCount(tableName: string, userId: string) {
@@ -419,6 +445,7 @@ export default function Home() {
       setRecentLogs(logsData ?? []);
 
       await loadTopRecommendation(currentUser);
+      await loadPredictionFreshness(currentUser.id);
     } catch (error) {
       if (error instanceof Error) {
         setDashboardError(error.message);
@@ -678,6 +705,11 @@ export default function Home() {
           <p className="mt-2 max-w-3xl text-slate-300">
             Here’s what Lumora thinks is worth your attention next.
           </p>
+
+          <div className="mt-3">
+            <ForecastFreshness generatedAt={latestPredictionGeneratedAt} />
+          </div>
+
         </div>
 
         <Button onClick={handleLogout} variant="secondary">

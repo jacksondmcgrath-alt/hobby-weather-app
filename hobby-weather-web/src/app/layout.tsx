@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import "./globals.css";
@@ -18,11 +18,17 @@ export const metadata: Metadata = {
   description:
     "Lumora helps you find the best outdoor activity windows as conditions change.",
   manifest: "/manifest.json",
-  themeColor: "#030716",
   icons: {
     icon: [
       {
-        url: "/favicon.ico",
+        url: "/favicon-32.png",
+        sizes: "32x32",
+        type: "image/png",
+      },
+      {
+        url: "/favicon-16.png",
+        sizes: "16x16",
+        type: "image/png",
       },
       {
         url: "/icon-192.png",
@@ -48,6 +54,10 @@ export const metadata: Metadata = {
     title: "Lumora",
     statusBarStyle: "black-translucent",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#030716",
 };
 
 export default function RootLayout({

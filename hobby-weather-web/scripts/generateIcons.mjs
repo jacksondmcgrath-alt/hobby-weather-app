@@ -1,14 +1,10 @@
 import sharp from "sharp";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync } from "fs";
 
 const input = "public/lumora-logo.png";
 
 if (!existsSync(input)) {
   throw new Error(`Missing input file: ${input}`);
-}
-
-if (!existsSync("public")) {
-  mkdirSync("public");
 }
 
 const sizes = [
@@ -34,8 +30,24 @@ const sizes = [
   },
 ];
 
+// Increase this number to zoom in more.
+// Try 1.20, 1.30, or 1.40.
+const zoom = 1.35;
+
 for (const item of sizes) {
+  const cropSize = Math.round(1024 / zoom);
+
   await sharp(input)
+    .resize(1024, 1024, {
+      fit: "cover",
+      position: "center",
+    })
+    .extract({
+      left: Math.round((1024 - cropSize) / 2),
+      top: Math.round((1024 - cropSize) / 2),
+      width: cropSize,
+      height: cropSize,
+    })
     .resize(item.size, item.size, {
       fit: "cover",
       position: "center",
