@@ -75,6 +75,7 @@ type LocationRanking = {
     aqi?: number | null;
     uv_index?: number | null;
   } | null;
+  location_context?: Record<string, unknown> | null;
 };
 
 function toDateString(date: Date) {
@@ -343,19 +344,35 @@ export default function ExplorePage() {
     }
 
     const { error } = await supabase.from("planned_activities").insert({
-      user_id: user.id,
-      activity: ranking.activity,
-      planned_date: ranking.date,
-      planned_window: ranking.recommended_window ?? "Suggested time TBD",
-      status: "Planned",
-      location_name: ranking.location_name ?? "",
-      score_at_planning: ranking.score,
-      planning_score_at_planning: ranking.planning_score,
-      forecast_confidence_at_planning: ranking.forecast_confidence ?? null,
-      forecast_confidence_label_at_planning:
-        ranking.forecast_confidence_label ?? null,
-      notes: `Created from Explore. Lumora ranked this location for ${ranking.activity}.`,
-    });
+        user_id: user.id,
+        activity: ranking.activity,
+        planned_date: ranking.date,
+        planned_window: ranking.recommended_window ?? "Suggested time TBD",
+        status: "Planned",
+        location_name: ranking.location_name ?? "",
+        score_at_planning: ranking.score,
+        planning_score_at_planning: ranking.planning_score,
+        forecast_confidence_at_planning: ranking.forecast_confidence ?? null,
+        forecast_confidence_label_at_planning:
+            ranking.forecast_confidence_label ?? null,
+        weather_snapshot_at_planning: ranking.weather_snapshot,
+        location_context_at_planning: ranking.location_context ?? null,
+        preference_snapshot_at_planning: null,
+        prediction_context_at_planning: {
+            source: ranking.source ?? "saved",
+            result_id: ranking.result_id ?? null,
+            external_id: ranking.external_id ?? null,
+            external_type: ranking.external_type ?? null,
+            external_source: ranking.external_source ?? null,
+            score: ranking.score,
+            planning_score: ranking.planning_score,
+            forecast_confidence: ranking.forecast_confidence ?? null,
+            forecast_confidence_label: ranking.forecast_confidence_label ?? null,
+            recommended_window: ranking.recommended_window,
+            window_score: ranking.window_score,
+        },
+        notes: `Created from Explore. Lumora ranked this location for ${ranking.activity}.`,
+        });
 
     if (error) {
         setRankingError(error.message);

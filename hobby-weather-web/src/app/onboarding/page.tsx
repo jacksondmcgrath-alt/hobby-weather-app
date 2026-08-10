@@ -344,12 +344,14 @@ export default function OnboardingPage() {
         {
             user_id: user.id,
             settings: {
-            enabled_activities: enabledActivities,
-            bug_tolerance: bugTolerance,
-            rain_caution: rainCaution,
-            running_heat_sensitivity: heatSensitivity,
-            running_wind_sensitivity: windSensitivity,
-            },
+                enabled_activities: enabledActivities,
+                bug_tolerance: bugTolerance,
+                rain_caution: rainCaution,
+                general_heat_sensitivity: heatSensitivity,
+                wind_sensitivity: windSensitivity,
+                running_heat_sensitivity: heatSensitivity,
+                running_wind_sensitivity: windSensitivity,
+                },
         },
         {
             onConflict: "user_id",

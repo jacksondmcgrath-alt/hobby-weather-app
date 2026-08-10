@@ -77,6 +77,25 @@ type PredictionRow = {
   water_temp_est: number | null;
   best_species: string | null;
   best_species_score: number | null;
+  recommended_window: string | null;
+  window_score: number | null;
+  location_name: string | null;
+  weather_snapshot?: Record<string, unknown> | null;
+  location_context?: Record<string, unknown> | null;
+  feature_json?: {
+    preferences?: Record<string, unknown>;
+    [key: string]: unknown;
+  } | null;
+  prediction_source?: string | null;
+  scoring_method?: string | null;
+  model_version?: string | null;
+  ml_status?: string | null;
+  rule_score?: number | null;
+  ml_score?: number | null;
+  final_score?: number | null;
+  blended_score?: number | null;
+  rule_weight?: number | null;
+  ml_weight?: number | null;
 };
 
 type PipelineRun = {
@@ -326,6 +345,22 @@ export default function Home() {
         water_temp_est: item.weather_snapshot?.water_temp_est ?? null,
         best_species: item.best_species,
         best_species_score: item.best_species_score,
+        recommended_window: item.recommended_window,
+        window_score: item.window_score,
+        location_name: item.location_name,
+        weather_snapshot: item.weather_snapshot ?? null,
+        location_context: item.location_context ?? null,
+        feature_json: item.feature_json ?? null,
+        prediction_source: item.prediction_source,
+        scoring_method: item.scoring_method,
+        model_version: item.model_version,
+        ml_status: item.ml_status,
+        rule_score: item.rule_score,
+        ml_score: item.ml_score,
+        final_score: item.final_score,
+        blended_score: item.blended_score,
+        rule_weight: item.rule_weight,
+        ml_weight: item.ml_weight,
       })) as PredictionRow[];
 
       const sorted = cleaned.sort(
@@ -492,7 +527,7 @@ export default function Home() {
         user_id: user.id,
         activity: topRecommendation.activity,
         planned_date: topRecommendation.date,
-        planned_window: "Suggested time TBD",
+        planned_window: topRecommendation.recommended_window ?? "Suggested time TBD",
         status: "Planned",
         location_name: "",
         score_at_planning: topRecommendation.predicted_score,
@@ -502,6 +537,24 @@ export default function Home() {
           topRecommendation.forecast_confidence_label ?? null,
         species_target_at_planning: topRecommendation.best_species,
         notes: "Created from Home recommendation.",
+        weather_snapshot_at_planning: topRecommendation.weather_snapshot ?? null,
+        location_context_at_planning: topRecommendation.location_context ?? null,
+        preference_snapshot_at_planning:
+          topRecommendation.feature_json?.preferences ?? null,
+        prediction_context_at_planning: {
+          prediction_source: topRecommendation.prediction_source ?? null,
+          scoring_method: topRecommendation.scoring_method ?? null,
+          model_version: topRecommendation.model_version ?? null,
+          ml_status: topRecommendation.ml_status ?? null,
+          rule_score: topRecommendation.rule_score ?? null,
+          ml_score: topRecommendation.ml_score ?? null,
+          final_score: topRecommendation.final_score ?? null,
+          blended_score: topRecommendation.blended_score ?? null,
+          rule_weight: topRecommendation.rule_weight ?? null,
+          ml_weight: topRecommendation.ml_weight ?? null,
+          recommended_window: topRecommendation.recommended_window ?? null,
+          window_score: topRecommendation.window_score ?? null,
+        },
       });
 
     if (error) {
@@ -647,23 +700,6 @@ export default function Home() {
     );
   }
 
-  {profile && profile.onboarding_complete === false && (
-    <Card className="mt-8">
-      <SectionTitle
-        title="Finish setting up Lumora"
-        description="Add your home location and choose activities so Lumora can generate better recommendations."
-        action={
-          <Link
-            href="/onboarding"
-            className="rounded-lg bg-[rgb(var(--brand-rgb))] px-4 py-2 text-sm font-semibold text-[#030716] transition hover:bg-[rgb(var(--brand-soft-rgb))]"
-          >
-            Continue setup
-          </Link>
-        }
-      />
-    </Card>
-  )}
-
   const scenarioProgress = Math.min(
     counts.scenarioRatings / SCENARIO_TOTAL_GOAL,
     1
@@ -716,6 +752,23 @@ export default function Home() {
           Log out
         </Button>
       </header>
+
+      {profile && profile.onboarding_complete === false && (
+        <Card className="mt-8">
+          <SectionTitle
+            title="Finish setting up Lumora"
+            description="Add your home location and choose activities so Lumora can generate better recommendations."
+            action={
+              <Link
+                href="/onboarding"
+                className="rounded-lg bg-[rgb(var(--brand-rgb))] px-4 py-2 text-sm font-semibold text-[#030716] transition hover:bg-[rgb(var(--brand-soft-rgb))]"
+              >
+                Continue setup
+              </Link>
+            }
+          />
+        </Card>
+      )}
 
       {dashboardError && (
         <StatusMessage type="error">
@@ -806,7 +859,7 @@ export default function Home() {
                         topRecommendation.planning_score ??
                         topRecommendation.predicted_score,
                       label: topRecommendation.label,
-                      recommendedWindow: "Suggested time TBD",
+                      recommendedWindow: topRecommendation.recommended_window ?? "Suggested time TBD",
                       forecastConfidenceLabel: topRecommendation.forecast_confidence_label,
                       avgTemp: topRecommendation.avg_temp,
                       windMax: topRecommendation.wind_max,
@@ -1104,7 +1157,7 @@ function RecommendationCalendarLink({
 }: {
   prediction: PredictionRow;
 }) {
-  const windowText = "Suggested time TBD";
+  const windowText = prediction.recommended_window ?? "Suggested time TBD";
 
   const { start, end } = parseWindowToDates(
     prediction.date ?? new Date().toISOString().slice(0, 10),

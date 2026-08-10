@@ -256,10 +256,11 @@ export function ConfidenceBadge({
   let styles = "bg-slate-700 text-slate-200";
 
   if (confidence !== null && confidence !== undefined) {
-    if (confidence >= 0.75 || normalizedLabel.toLowerCase().includes("high")) {
+    if (confidence >= 75 || normalizedLabel.toLowerCase().includes("high")) {
       styles = "bg-green-600 text-white";
     } else if (
-      confidence >= 0.45 ||
+      confidence >= 55 ||
+      normalizedLabel.toLowerCase().includes("solid") ||
       normalizedLabel.toLowerCase().includes("medium")
     ) {
       styles = "bg-sky-500 text-white";

@@ -15,6 +15,7 @@ import {
   Badge,
   EmptyState,
 } from "@/components/ui";
+import { loadBestMatchingPredictionContext } from "@/lib/predictionMatching";
 
 type ActivityLog = {
   id: number;
@@ -30,6 +31,24 @@ type ActivityLog = {
   absolute_error: number | null;
   did_i_go: string | null;
   notes: string | null;
+  location_context: Record<string, unknown> | null;
+};
+
+type SavedLocation = {
+  id: number;
+  name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  location_type: string | null;
+  water_type: string | null;
+  water_body_size: string | null;
+  wind_exposure: string | null;
+  manual_water_temp: number | null;
+  use_usgs_water_data: boolean | null;
+  usgs_site_id: string | null;
+  use_ndbc_data: boolean | null;
+  ndbc_station_id: string | null;
+  notes: string | null;
 };
 
 const DID_GO_OPTIONS = [
@@ -44,6 +63,8 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState("");
+  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState("");
 
   const [activity, setActivity] = useState("Running");
   const [date, setDate] = useState("");
@@ -72,10 +93,12 @@ export default function LogsPage() {
   useEffect(() => {
     if (!user) {
       setLogs([]);
+      setSavedLocations([]);
       return;
     }
 
     loadLogs();
+    loadSavedLocations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -104,6 +127,7 @@ export default function LogsPage() {
           "absolute_error",
           "did_i_go",
           "notes",
+          "location_context",
         ].join(",")
       )
       .eq("user_id", user.id)
@@ -118,6 +142,43 @@ export default function LogsPage() {
 
     setLogs((data ?? []) as unknown as ActivityLog[]);
     setLogsLoading(false);
+  }
+
+  async function loadSavedLocations() {
+    if (!user) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("saved_locations")
+      .select(
+        [
+          "id",
+          "name",
+          "latitude",
+          "longitude",
+          "location_type",
+          "water_type",
+          "water_body_size",
+          "wind_exposure",
+          "manual_water_temp",
+          "use_usgs_water_data",
+          "usgs_site_id",
+          "use_ndbc_data",
+          "ndbc_station_id",
+          "notes",
+        ].join(",")
+      )
+      .eq("user_id", user.id)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.warn("Could not load saved locations for logs:", error.message);
+      setSavedLocations([]);
+      return;
+    }
+
+    setSavedLocations((data ?? []) as unknown as SavedLocation[]);
   }
 
   async function handleSaveLog(event: React.FormEvent<HTMLFormElement>) {
@@ -135,22 +196,21 @@ export default function LogsPage() {
 
     const actualScore = actualEnjoyment * 10;
 
-    const { data: matchingPredictionData } = await supabase
-      .from("user_predictions")
-      .select("weather_snapshot,location_context,feature_json")
-      .eq("user_id", user.id)
-      .eq("date", date)
-      .eq("activity", activity)
-      .limit(1)
-      .maybeSingle();
+    const selectedLocation =
+      savedLocations.find(
+        (location) => String(location.id) === String(selectedLocationId)
+      ) ?? null;
 
-    const matchingPrediction = matchingPredictionData as unknown as {
-      weather_snapshot?: Record<string, unknown> | null;
-      location_context?: Record<string, unknown> | null;
-      feature_json?: {
-        preferences?: Record<string, unknown>;
-      } | null;
-    } | null;
+    const selectedLocationContext = selectedLocation
+      ? buildSavedLocationContext(selectedLocation)
+      : null;
+
+    const matchingPrediction = await loadBestMatchingPredictionContext({
+      userId: user.id,
+      date,
+      activity,
+      locationName: selectedLocation?.name ?? null,
+    });
 
     const { error } = await supabase
       .from("activity_logs")
@@ -167,7 +227,8 @@ export default function LogsPage() {
         did_i_go: didIGo,
         notes,
         weather_snapshot: matchingPrediction?.weather_snapshot ?? null,
-        location_context: matchingPrediction?.location_context ?? null,
+        location_context:
+          matchingPrediction?.location_context ?? selectedLocationContext ?? null,
         preference_snapshot: matchingPrediction?.feature_json?.preferences ?? null,
       });
 
@@ -182,13 +243,20 @@ export default function LogsPage() {
     await trackEvent(user.id, "activity_log_created", {
       activity,
       date,
+      location_name: selectedLocation?.name ?? null,
+      saved_location_id: selectedLocation?.id ?? null,
       actual_enjoyment: actualEnjoyment,
       did_i_go: didIGo,
+      matched_prediction_location:
+        matchingPrediction?.location_name ??
+        (matchingPrediction?.location_context?.location_name as string | undefined) ??
+        null,
     });
 
     setNotes("");
     setActualEnjoyment(7);
     setDidIGo("Yes");
+    setSelectedLocationId("");
 
     await loadLogs();
 
@@ -370,6 +438,32 @@ export default function LogsPage() {
                 />
               </label>
             </div>
+
+            <label className="grid gap-1">
+              <span className="text-sm font-medium text-slate-300">
+                Location, optional
+              </span>
+
+              <select
+                value={selectedLocationId}
+                onChange={(event) => setSelectedLocationId(event.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none transition focus:border-[rgb(var(--season-rgb))] focus:ring-2 focus:ring-[rgb(var(--season-rgb)_/_0.18)]"
+              >
+                <option value="">Use best matching prediction</option>
+
+                {savedLocations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name ?? "Unnamed location"}
+                    {location.location_type ? ` (${location.location_type})` : ""}
+                  </option>
+                ))}
+              </select>
+
+              <p className="text-xs text-slate-500">
+                Choosing a location helps Lumora attach the right forecast context to this
+                log.
+              </p>
+            </label>
 
             <Panel>
               <label className="grid gap-2">
@@ -591,6 +685,12 @@ export default function LogsPage() {
                         {formatFriendlyDate(log.date)}
                       </div>
 
+                      {getActivityLogLocationName(log) && (
+                        <div className="mt-1 text-sm text-sky-300">
+                          Location: {getActivityLogLocationName(log)}
+                        </div>
+                      )}
+
                       {log.planned_activity_id && (
                         <div className="mt-1 text-xs text-sky-300">
                           Linked to planned activity #{log.planned_activity_id}
@@ -643,6 +743,39 @@ export default function LogsPage() {
       </Card>
     </>
   );
+}
+
+function buildSavedLocationContext(location: SavedLocation) {
+  return {
+    saved_location_id: location.id,
+    location_name: location.name,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    location_type: location.location_type,
+    water_type: location.water_type,
+    water_body_size: location.water_body_size,
+    wind_exposure: location.wind_exposure,
+    manual_water_temp: location.manual_water_temp,
+    use_usgs_water_data: location.use_usgs_water_data,
+    usgs_site_id: location.usgs_site_id,
+    use_ndbc_data: location.use_ndbc_data,
+    ndbc_station_id: location.ndbc_station_id,
+    notes: location.notes,
+  };
+}
+
+function getActivityLogLocationName(log: ActivityLog) {
+  const context = log.location_context;
+
+  if (!context || typeof context !== "object") {
+    return null;
+  }
+
+  const locationName = context.location_name;
+
+  return typeof locationName === "string" && locationName.trim() !== ""
+    ? locationName
+    : null;
 }
 
 function formatFriendlyDate(dateString: string | null | undefined) {

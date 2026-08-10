@@ -21,6 +21,7 @@ import {
   EmptyState,
   StatCard,
 } from "@/components/ui";
+import { loadBestMatchingPredictionContext } from "@/lib/predictionMatching";
 
 type PlannedActivity = {
   id: number;
@@ -36,6 +37,10 @@ type PlannedActivity = {
   forecast_confidence_label_at_planning: string | null;
   species_target_at_planning: string | null;
   notes: string | null;
+  weather_snapshot_at_planning: Record<string, unknown> | null;
+  location_context_at_planning: Record<string, unknown> | null;
+  preference_snapshot_at_planning: Record<string, unknown> | null;
+  prediction_context_at_planning: Record<string, unknown> | null;
 };
 
 type ActivityLog = {
@@ -168,6 +173,10 @@ export default function PlansPage() {
           "forecast_confidence_label_at_planning",
           "species_target_at_planning",
           "notes",
+          "weather_snapshot_at_planning",
+          "location_context_at_planning",
+          "preference_snapshot_at_planning",
+          "prediction_context_at_planning",
         ].join(",")
       )
       .eq("user_id", user.id)
@@ -435,22 +444,12 @@ export default function PlansPage() {
       absoluteError = Math.abs(predictionError);
     }
 
-    const { data: matchingPredictionData } = await supabase
-      .from("user_predictions")
-      .select("weather_snapshot,location_context,feature_json")
-      .eq("user_id", user.id)
-      .eq("date", plan.planned_date)
-      .eq("activity", plan.activity)
-      .limit(1)
-      .maybeSingle();
-
-    const matchingPrediction = matchingPredictionData as unknown as {
-      weather_snapshot?: Record<string, unknown> | null;
-      location_context?: Record<string, unknown> | null;
-      feature_json?: {
-        preferences?: Record<string, unknown>;
-      } | null;
-    } | null;
+    const matchingPrediction = await loadBestMatchingPredictionContext({
+      userId: user.id,
+      date: plan.planned_date,
+      activity: plan.activity,
+      locationName: plan.location_name,
+    });
 
     const { error: logErrorResponse } = await supabase
       .from("activity_logs")
@@ -469,9 +468,18 @@ export default function PlansPage() {
         absolute_error: absoluteError,
         did_i_go: logDidIGo,
         notes: logNotes,
-        weather_snapshot: matchingPrediction?.weather_snapshot ?? null,
-        location_context: matchingPrediction?.location_context ?? null,
-        preference_snapshot: matchingPrediction?.feature_json?.preferences ?? null,
+        weather_snapshot:
+          plan.weather_snapshot_at_planning ??
+          matchingPrediction?.weather_snapshot ??
+          null,
+        location_context:
+          plan.location_context_at_planning ??
+          matchingPrediction?.location_context ??
+          null,
+        preference_snapshot:
+          plan.preference_snapshot_at_planning ??
+          matchingPrediction?.feature_json?.preferences ??
+          null,
       });
 
     if (logErrorResponse) {
@@ -499,7 +507,12 @@ export default function PlansPage() {
       plan_id: plan.id,
       activity: plan.activity,
       planned_date: plan.planned_date,
+      location_name: plan.location_name,
       actual_enjoyment: logEnjoyment,
+      matched_prediction_location:
+        matchingPrediction?.location_name ??
+        (matchingPrediction?.location_context?.location_name as string | undefined) ??
+        null,
     });
 
     setActionMessage("Activity log created and plan marked Completed.");

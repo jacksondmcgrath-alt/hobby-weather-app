@@ -56,6 +56,12 @@ type PredictionRow = {
   prediction_source: string | null;
   recommended_window: string | null;
   window_score: number | null;
+  weather_snapshot?: Record<string, unknown> | null;
+  location_context?: Record<string, unknown> | null;
+  feature_json?: {
+    preferences?: Record<string, unknown>;
+    [key: string]: unknown;
+  } | null;
 };
 
 type PlannedActivity = {
@@ -169,6 +175,9 @@ export default function PlannerPage() {
         prediction_source: item.prediction_source,
         recommended_window: item.recommended_window,
         window_score: item.window_score,
+        weather_snapshot: item.weather_snapshot ?? null,
+        location_context: item.location_context ?? null,
+        feature_json: item.feature_json ?? null,
       }));
     } else {
       // --------------------------------------------------
@@ -238,6 +247,9 @@ export default function PlannerPage() {
         prediction_source: "prediction_history",
         recommended_window: null,
         window_score: null,
+        weather_snapshot: null,
+        location_context: null,
+        feature_json: null,
       }));
     }
 
@@ -444,8 +456,27 @@ export default function PlannerPage() {
         score_at_planning: prediction.predicted_score,
         planning_score_at_planning: prediction.planning_score,
         forecast_confidence_at_planning: prediction.forecast_confidence,
-        forecast_confidence_label_at_planning: prediction.forecast_confidence_label,
+        forecast_confidence_label_at_planning:
+          prediction.forecast_confidence_label,
         species_target_at_planning: prediction.best_species,
+        weather_snapshot_at_planning: prediction.weather_snapshot ?? null,
+        location_context_at_planning: prediction.location_context ?? null,
+        preference_snapshot_at_planning:
+          prediction.feature_json?.preferences ?? null,
+        prediction_context_at_planning: {
+          prediction_source: prediction.prediction_source,
+          scoring_method: prediction.scoring_method,
+          model_version: prediction.model_version,
+          ml_status: prediction.ml_status,
+          rule_score: prediction.rule_score,
+          ml_score: prediction.ml_score,
+          final_score: prediction.final_score,
+          blended_score: prediction.blended_score,
+          rule_weight: prediction.rule_weight,
+          ml_weight: prediction.ml_weight,
+          recommended_window: prediction.recommended_window,
+          window_score: prediction.window_score,
+        },
         notes: "",
       });
 
