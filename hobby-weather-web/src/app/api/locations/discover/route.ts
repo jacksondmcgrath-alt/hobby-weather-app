@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ACTIVITY_OPTIONS } from "@/lib/activityMeta";
 import {
   getWeekDates,
@@ -14,15 +13,10 @@ import {
 } from "@/lib/server/lumora/userData";
 import { discoverOsmCandidates } from "@/lib/server/lumora/osmDiscovery";
 import { rankLocationCandidatesForExplore } from "@/lib/server/lumora/rankCandidates";
+import { authenticateApiRequest } from "@/lib/server/lumora/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-type SupabaseAdmin = any;
 
 type DiscoverLocationsRequest = {
   activity?: string;
@@ -40,15 +34,6 @@ function normalizeRadiusMiles(value: unknown) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
-    return NextResponse.json(
-      {
-        error:
-          "Server is missing Supabase environment variables for location discovery.",
-      },
-      { status: 500 }
-    );
-  }
 
   let body: DiscoverLocationsRequest = {};
 
@@ -80,35 +65,13 @@ export async function POST(request: NextRequest) {
   const targetDates =
     mode === "week" ? getWeekDates() : [selectedDate as string];
 
-  const authHeader = request.headers.get("authorization");
+  const auth = await authenticateApiRequest(request);
 
-  if (!authHeader?.startsWith("Bearer ")) {
-    return NextResponse.json(
-      { error: "Missing authorization token." },
-      { status: 401 }
-    );
-  }
+    if (!auth.ok) {
+    return auth.response;
+    }
 
-  const accessToken = authHeader.replace("Bearer ", "");
-
-  const authClient = createClient(supabaseUrl, supabaseAnonKey);
-
-  const {
-    data: { user },
-    error: userError,
-  } = await authClient.auth.getUser(accessToken);
-
-  if (userError || !user) {
-    return NextResponse.json(
-      { error: "Could not verify user." },
-      { status: 401 }
-    );
-  }
-
-  const admin = createClient(
-    supabaseUrl,
-    supabaseServiceRoleKey
-  ) as SupabaseAdmin;
+    const { user, admin } = auth;
 
   try {
     const preferences = await loadPreferences(admin, user.id);

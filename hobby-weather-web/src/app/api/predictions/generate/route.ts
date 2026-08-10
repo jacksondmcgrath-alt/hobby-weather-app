@@ -1,161 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { generateUserPredictionsNow } from "@/lib/predictions/generateUserPredictions";
+import { authenticateApiRequest } from "@/lib/server/lumora/auth";
+import {
+  DEFAULT_PREDICTION_FRESHNESS_HOURS,
+  getPredictionFreshness,
+  logPredictionRun,
+  trackPredictionEvent,
+} from "@/lib/server/lumora/predictionRuns";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-const FRESHNESS_HOURS = 3;
 
 type GenerateRequestBody = {
   force?: boolean;
   reason?: string;
 };
 
-type LatestPredictionRow = {
-  generated_at: string | null;
-};
-
-/**
- * Supabase's TypeScript inference can get confused without generated DB types.
- * For this server-only admin route, we keep the client type loose.
- */
-type SupabaseAdminClient = any;
-
-function dateStringFromOffset(daysOffset: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + daysOffset);
-  return date.toISOString().slice(0, 10);
-}
-
-function hoursSince(dateString: string) {
-  const date = new Date(dateString);
-  return (Date.now() - date.getTime()) / (1000 * 60 * 60);
-}
-
-async function getPredictionFreshness({
-  admin,
-  userId,
-}: {
-  admin: SupabaseAdminClient;
-  userId: string;
-}) {
-  const startDate = dateStringFromOffset(0);
-  const endDate = dateStringFromOffset(14);
-
-  const { count, error: countError } = await admin
-    .from("user_predictions")
-    .select("id", {
-      count: "exact",
-      head: true,
-    })
-    .eq("user_id", userId)
-    .gte("date", startDate)
-    .lte("date", endDate);
-
-  if (countError) {
-    throw countError;
-  }
-
-  const { data: latestPredictionData, error: latestError } = await admin
-    .from("user_predictions")
-    .select("generated_at")
-    .eq("user_id", userId)
-    .gte("date", startDate)
-    .lte("date", endDate)
-    .order("generated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestError) {
-    throw latestError;
-  }
-
-  const latestPrediction = latestPredictionData as LatestPredictionRow | null;
-
-  const predictionCount = count ?? 0;
-  const latestGeneratedAt = latestPrediction?.generated_at ?? null;
-
-  const isMissing = predictionCount === 0;
-  const isStale =
-    !latestGeneratedAt || hoursSince(latestGeneratedAt) >= FRESHNESS_HOURS;
-
-  return {
-    predictionCount,
-    latestGeneratedAt,
-    isMissing,
-    isStale,
-    startDate,
-    endDate,
-  };
-}
-
-async function logPredictionRun({
-  admin,
-  status,
-  predictionsWritten,
-  reason,
-  errorMessage,
-}: {
-  admin: SupabaseAdminClient;
-  status: string;
-  predictionsWritten: number;
-  reason: string;
-  errorMessage?: string | null;
-}) {
-  try {
-    const row = {
-      run_source: `api:${reason}`,
-      status,
-      users_processed: 1,
-      predictions_written: predictionsWritten,
-      error_message: errorMessage ?? null,
-    };
-
-    await admin.from("prediction_pipeline_runs").insert(row);
-  } catch (error) {
-    console.error("Could not log prediction run:", error);
-  }
-}
-
-async function trackPredictionEvent({
-  admin,
-  userId,
-  eventName,
-  eventData,
-}: {
-  admin: SupabaseAdminClient;
-  userId: string;
-  eventName: string;
-  eventData: Record<string, unknown>;
-}) {
-  try {
-    const row = {
-      user_id: userId,
-      event_name: eventName,
-      event_data: eventData,
-    };
-
-    await admin.from("app_events").insert(row);
-  } catch (error) {
-    console.error("Could not track prediction event:", error);
-  }
-}
-
 export async function POST(request: NextRequest) {
-  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
-    return NextResponse.json(
-      {
-        error:
-          "Server is missing Supabase environment variables for prediction generation.",
-      },
-      { status: 500 }
-    );
-  }
 
   let body: GenerateRequestBody = {};
 
@@ -168,41 +29,20 @@ export async function POST(request: NextRequest) {
   const force = Boolean(body.force);
   const reason = body.reason?.trim() || "manual";
 
-  const authHeader = request.headers.get("authorization");
+  const auth = await authenticateApiRequest(request);
 
-  if (!authHeader?.startsWith("Bearer ")) {
-    return NextResponse.json(
-      { error: "Missing authorization token." },
-      { status: 401 }
-    );
-  }
+    if (!auth.ok) {
+    return auth.response;
+    }
 
-  const accessToken = authHeader.replace("Bearer ", "");
-
-  const authClient = createClient(supabaseUrl, supabaseAnonKey);
-
-  const {
-    data: { user },
-    error: userError,
-  } = await authClient.auth.getUser(accessToken);
-
-  if (userError || !user) {
-    return NextResponse.json(
-      { error: "Could not verify user." },
-      { status: 401 }
-    );
-  }
-
-  const admin = createClient(
-    supabaseUrl,
-    supabaseServiceRoleKey
-  ) as SupabaseAdminClient;
+    const { user, admin } = auth;
 
   try {
     const freshness = await getPredictionFreshness({
-      admin,
-      userId: user.id,
-    });
+        admin,
+        userId: user.id,
+        freshnessHours: DEFAULT_PREDICTION_FRESHNESS_HOURS,
+        });
 
     if (!force && !freshness.isMissing && !freshness.isStale) {
       await trackPredictionEvent({

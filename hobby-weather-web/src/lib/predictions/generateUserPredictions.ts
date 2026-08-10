@@ -32,72 +32,23 @@ import {
 } from "@/lib/server/lumora/preferences";
 import {
   buildLocationContext,
-  findHomeLocation,
   loadSavedLocations,
   loadWeeklyObligations,
   type SavedLocation,
 } from "@/lib/server/lumora/userData";
+import {
+  buildActivityLocationMap,
+  loadActivityDefaults,
+} from "@/lib/server/lumora/activityDefaults";
 
 const ACTIVITIES = ACTIVITY_OPTIONS;
 
 type SupabaseAdmin = SupabaseClient<any, "public", any>;
 
-type ActivityDefault = {
-  activity: string | null;
-  saved_location_id: number | null;
-};
-
 type PredictionResult = {
   predictionsWritten: number;
   locationsUsed: number;
 };
-
-function findFirstValidLocation(locations: SavedLocation[]) {
-  return (
-    locations.find(
-      (location) => location.latitude !== null && location.longitude !== null
-    ) ?? null
-  );
-}
-
-function buildActivityLocationMap(
-  locations: SavedLocation[],
-  defaults: ActivityDefault[],
-  enabledActivities: string[]
-) {
-  const byId = new Map(locations.map((location) => [location.id, location]));
-  const fallback = findHomeLocation(locations) ?? findFirstValidLocation(locations);
-
-  const map = new Map<string, SavedLocation>();
-
-  for (const activity of enabledActivities) {
-    const defaultRow = defaults.find((item) => item.activity === activity);
-    const defaultLocation =
-      defaultRow?.saved_location_id !== null &&
-      defaultRow?.saved_location_id !== undefined
-        ? byId.get(defaultRow.saved_location_id)
-        : undefined;
-
-    if (defaultLocation) {
-      map.set(activity, defaultLocation);
-    } else if (fallback) {
-      map.set(activity, fallback);
-    }
-  }
-
-  return map;
-}
-
-async function loadActivityDefaults(admin: SupabaseAdmin, userId: string) {
-  const { data, error } = await admin
-    .from("activity_location_defaults")
-    .select("activity,saved_location_id")
-    .eq("user_id", userId);
-
-  if (error) throw error;
-
-  return (data ?? []) as ActivityDefault[];
-}
 
 function buildGearNotes(day: DailyWeather) {
   const notes: string[] = [];
