@@ -24,6 +24,15 @@ import {
 } from "@/components/ui";
 import { ForecastFreshness } from "@/components/ForecastFreshness";
 
+type ScoreComponents = {
+  base_score?: number | null;
+  preference_adjustment?: number | null;
+  calibrated_score?: number | null;
+  planning_score?: number | null;
+  forecast_confidence?: number | null;
+  window_score?: number | null;
+};
+
 type PredictionRow = {
   date: string | null;
   activity: string | null;
@@ -62,6 +71,7 @@ type PredictionRow = {
     preferences?: Record<string, unknown>;
     [key: string]: unknown;
   } | null;
+  score_components?: ScoreComponents | null;
 };
 
 type PlannedActivity = {
@@ -178,6 +188,7 @@ export default function PlannerPage() {
         weather_snapshot: item.weather_snapshot ?? null,
         location_context: item.location_context ?? null,
         feature_json: item.feature_json ?? null,
+        score_components: item.feature_json?.score_components ?? null,
       }));
     } else {
       // --------------------------------------------------
@@ -250,6 +261,7 @@ export default function PlannerPage() {
         weather_snapshot: null,
         location_context: null,
         feature_json: null,
+        score_components: null,
       }));
     }
 
@@ -476,6 +488,7 @@ export default function PlannerPage() {
           ml_weight: prediction.ml_weight,
           recommended_window: prediction.recommended_window,
           window_score: prediction.window_score,
+          score_components: prediction.score_components ?? null,
         },
         notes: "",
       });

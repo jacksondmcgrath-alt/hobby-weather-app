@@ -40,6 +40,7 @@ import {
   buildActivityLocationMap,
   loadActivityDefaults,
 } from "@/lib/server/lumora/activityDefaults";
+import type { ScoreComponents } from "@/lib/server/lumora/rankCandidates";
 
 const ACTIVITIES = ACTIVITY_OPTIONS;
 
@@ -155,6 +156,15 @@ export async function generateUserPredictionsNow({
         obligations,
       });
 
+      const scoreComponents: ScoreComponents = {
+        base_score: base.score,
+        preference_adjustment: Math.round(adjustment),
+        calibrated_score: predictedScore,
+        planning_score: planningScore,
+        forecast_confidence: confidence,
+        window_score: windowRecommendation.windowScore,
+        };
+
       const weatherSnapshot = buildWeatherSnapshot(day);
 
       let explanation = base.explanation;
@@ -219,6 +229,7 @@ export async function generateUserPredictionsNow({
           weather_snapshot: weatherSnapshot,
           preferences,
           location_context: context,
+          score_components: scoreComponents,
         },
         data_quality_json: {
           prediction_source: "typescript_direct_user_location_hourly_windows_v2",
@@ -241,6 +252,7 @@ export async function generateUserPredictionsNow({
           weather: weatherSnapshot,
           preferences,
           location: context,
+          score_components: scoreComponents,
         },
         model_explanation:
           "No ML model applied yet. Using TypeScript rule-based scoring with saved/default location context.",

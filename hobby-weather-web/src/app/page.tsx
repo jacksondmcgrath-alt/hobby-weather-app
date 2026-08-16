@@ -1,5 +1,5 @@
 "use client";
-
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -22,17 +22,26 @@ import {
   Card,
   Button,
   StatusMessage,
-  ScoreBadge,
-  WeatherStat,
   StatCard,
   EmptyState,
   SectionTitle,
   Badge,
   Panel,
+  LumoraScoreBar,
+  PersonalImpactChip,
 } from "@/components/ui";
 import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 import { buildLumoraTake } from "@/lib/recommendationText";
 import { ForecastFreshness } from "@/components/ForecastFreshness";
+
+type ScoreComponents = {
+  base_score?: number | null;
+  preference_adjustment?: number | null;
+  calibrated_score?: number | null;
+  planning_score?: number | null;
+  forecast_confidence?: number | null;
+  window_score?: number | null;
+};
 
 type DashboardCounts = {
   savedLocations: number;
@@ -96,6 +105,7 @@ type PredictionRow = {
   blended_score?: number | null;
   rule_weight?: number | null;
   ml_weight?: number | null;
+  score_components?: ScoreComponents | null;
 };
 
 type PipelineRun = {
@@ -144,6 +154,9 @@ export default function Home() {
   const [recommendationMessage, setRecommendationMessage] = useState("");
   const [recommendationError, setRecommendationError] = useState("");
   const [savingRecommendationPlan, setSavingRecommendationPlan] = useState(false);
+  const [topRecommendationScope, setTopRecommendationScope] = useState<
+    "today" | "tomorrow" | "upcoming"
+  >("upcoming");
 
   const [latestPipelineRun, setLatestPipelineRun] = useState<PipelineRun | null>(null);
   const [latestPredictionGeneratedAt, setLatestPredictionGeneratedAt] =
@@ -361,15 +374,13 @@ export default function Home() {
         blended_score: item.blended_score,
         rule_weight: item.rule_weight,
         ml_weight: item.ml_weight,
+        score_components: item.feature_json?.score_components ?? null,
       })) as PredictionRow[];
 
-      const sorted = cleaned.sort(
-        (a, b) =>
-          (b.planning_score ?? b.predicted_score ?? 0) -
-          (a.planning_score ?? a.predicted_score ?? 0)
-      );
+      const choice = chooseHomeRecommendation(cleaned);
 
-      setTopRecommendation(sorted[0] ?? null);
+      setTopRecommendation(choice.prediction);
+      setTopRecommendationScope(choice.scope);
       return;
     }
 
@@ -403,11 +414,10 @@ export default function Home() {
 
     const fallbackRows = (fallbackPredictionData ?? []) as unknown as PredictionRow[];
 
-    const sortedFallback = fallbackRows.sort(
-      (a, b) => (b.predicted_score ?? 0) - (a.predicted_score ?? 0)
-    );
+    const choice = chooseHomeRecommendation(fallbackRows);
 
-    setTopRecommendation(sortedFallback[0] ?? null);
+    setTopRecommendation(choice.prediction);
+    setTopRecommendationScope(choice.scope);
   }
 
   async function loadDashboard(currentUser: User) {
@@ -529,7 +539,7 @@ export default function Home() {
         planned_date: topRecommendation.date,
         planned_window: topRecommendation.recommended_window ?? "Suggested time TBD",
         status: "Planned",
-        location_name: "",
+        location_name: topRecommendation.location_name ?? "",
         score_at_planning: topRecommendation.predicted_score,
         planning_score_at_planning: topRecommendation.planning_score ?? null,
         forecast_confidence_at_planning: topRecommendation.forecast_confidence ?? null,
@@ -554,6 +564,7 @@ export default function Home() {
           ml_weight: topRecommendation.ml_weight ?? null,
           recommended_window: topRecommendation.recommended_window ?? null,
           window_score: topRecommendation.window_score ?? null,
+          score_components: topRecommendation.score_components ?? null,
         },
       });
 
@@ -726,6 +737,23 @@ export default function Home() {
     ? formatFriendlyDate(topRecommendation.date)
     : "an upcoming day";
 
+  const recommendationWindow = getRecommendationWindow(topRecommendation);
+  const recommendationExploreHref = buildExploreHref(topRecommendation);
+
+  const personalizedScore = getPersonalizedScore(topRecommendation);
+  const personalImpact = getPersonalImpact(topRecommendation);
+  const forecastStabilityScore = getForecastStabilityScore(topRecommendation);
+
+  const forecastStability = normalizeForecastStabilityLabel({
+    confidence: forecastStabilityScore,
+    label: topRecommendation?.forecast_confidence_label,
+  });
+
+  const forecastStabilityText = forecastStabilityDetail(forecastStabilityScore);
+
+  const recommendationLocationName =
+    topRecommendation?.location_name?.trim() || null;
+
   return (
     <>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -782,115 +810,168 @@ export default function Home() {
 
       <section className="mt-8">
         {topRecommendation ? (
-          <Card className="relative overflow-hidden">
-            <div className="pointer-events-none absolute right-[-6rem] top-[-6rem] h-64 w-64 rounded-full bg-[rgb(var(--season-rgb)_/_0.14)] blur-3xl" />
+          <Card className="relative overflow-hidden border-[rgb(var(--brand-rgb)_/_0.18)] bg-slate-950/60 p-0">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_74%_18%,rgb(var(--brand-rgb)_/_0.12),transparent_30%),radial-gradient(circle_at_42%_26%,rgb(var(--brand-warm-rgb)_/_0.10),transparent_34%),linear-gradient(to_bottom,rgb(15_23_42/0.22),transparent_48%)]" />
 
-            <div className="relative flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-              <div className="max-w-3xl">
-                <div className="mb-3 inline-flex rounded-full border border-[rgb(var(--season-rgb)_/_0.35)] bg-[rgb(var(--season-rgb)_/_0.10)] px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-200">
-                  Best upcoming option
+            <div className="relative p-5 sm:p-6">
+              {/* Brand row */}
+              <div className="border-b border-white/10 pb-5">
+                <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-300">
+                  <span className="relative h-5 w-5 overflow-hidden rounded-md">
+                    <Image
+                      src="/lumora-logo.png"
+                      alt=""
+                      fill
+                      sizes="20px"
+                      className="object-cover"
+                    />
+                  </span>
+
+                  Lumora personalized weather
                 </div>
-
-                <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                  {activityLabel(topRecommendation.activity)} looks like your best bet.
-                </h2>
-
-                <p className="mt-3 text-slate-300">
-                  For {recommendationDateLabel}, this activity has the strongest
-                  combination of weather, score, and planning value.
-                </p>
-
-                <div className="mt-5 flex flex-wrap items-center gap-3">
-                  <ScoreBadge
-                    score={
-                      topRecommendation.planning_score ??
-                      topRecommendation.predicted_score
-                    }
-                    label={topRecommendation.label}
-                    size="lg"
-                  />
-
-                  {topRecommendation.forecast_confidence_label && (
-                    <Badge variant="info">
-                      {topRecommendation.forecast_confidence_label} confidence
-                    </Badge>
-                  )}
-                </div>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <WeatherStat
-                    label="Temperature"
-                    value={`${topRecommendation.avg_temp ?? "?"}°F`}
-                  />
-
-                  <WeatherStat
-                    label="Wind"
-                    value={`${topRecommendation.wind_max ?? "?"} mph`}
-                  />
-
-                  <WeatherStat
-                    label="Rain"
-                    value={`${topRecommendation.rain_chance ?? "?"}%`}
-                  />
-                </div>
-
-                {topRecommendation.activity === "Fishing" &&
-                  topRecommendation.best_species && (
-                    <div className="mt-4">
-                      <Badge variant="info">
-                        Best target: {topRecommendation.best_species}
-                        {topRecommendation.best_species_score !== null
-                          ? ` (${topRecommendation.best_species_score})`
-                          : ""}
-                      </Badge>
-                    </div>
-                  )}
-
-                <Panel className="mt-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Lumora’s take
-                  </div>
-
-                  <p className="mt-2 text-sm leading-6 text-slate-300">
-                    {buildLumoraTake({
-                      activity: activityLabel(topRecommendation.activity),
-                      date: topRecommendation.date,
-                      score:
-                        topRecommendation.planning_score ??
-                        topRecommendation.predicted_score,
-                      label: topRecommendation.label,
-                      recommendedWindow: topRecommendation.recommended_window ?? "Suggested time TBD",
-                      forecastConfidenceLabel: topRecommendation.forecast_confidence_label,
-                      avgTemp: topRecommendation.avg_temp,
-                      windMax: topRecommendation.wind_max,
-                      rainChance: topRecommendation.rain_chance,
-                      bugIndex: topRecommendation.bug_index,
-                      waterTempEst: topRecommendation.water_temp_est,
-                      locationName: null,
-                    })}
-                  </p>
-
-                  {topRecommendation.explanation && (
-                    <details className="mt-3 text-sm text-slate-400">
-                      <summary className="cursor-pointer font-semibold text-slate-300">
-                        Original scoring explanation
-                      </summary>
-
-                      <p className="mt-2 leading-6">
-                        {topRecommendation.explanation}
-                      </p>
-                    </details>
-                  )}
-                </Panel>
               </div>
 
-              <div className="grid min-w-48 gap-2">
+              {/* Identity + score */}
+              <div className="mt-8 grid gap-6 lg:grid-cols-12 lg:items-end">
+                <div className="lg:col-span-7">
+                  <div className="text-xs font-bold uppercase tracking-[0.22em] text-[rgb(var(--brand-warm-soft-rgb))]">
+                    {homeScopeEyebrow(topRecommendationScope)}
+                  </div>
+
+                  <h2 className="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
+                    <span className="block lg:inline">
+                      {activityLabel(topRecommendation.activity)}
+                    </span>
+
+                    {recommendationLocationName && (
+                      <>
+                        <span className="hidden lg:inline"> at </span>
+                        <span className="block text-slate-200 lg:inline">
+                          {recommendationLocationName}
+                        </span>
+                      </>
+                    )}
+                  </h2>
+
+                  {topRecommendationScope === "upcoming" && (
+                    <div className="mt-2 text-sm font-medium text-slate-400">
+                      {recommendationDateLabel}
+                    </div>
+                  )}
+                </div>
+
+                <div className="lg:col-span-5">
+                  <LumoraScoreBar
+                    label="Personalized score"
+                    score={personalizedScore}
+                    size="lg"
+                  />
+                </div>
+              </div>
+
+              {/* Decision row + forecast signals */}
+              <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1fr_0.75fr_auto_1.35fr] lg:items-start">
+                <div className="sm:col-span-2 lg:col-span-1">
+                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
+                    Best window
+                  </div>
+
+                  <div className="mt-2 break-words text-base font-bold text-white">
+                    {recommendationWindow}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6 lg:contents">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
+                      Personal impact
+                    </div>
+
+                    <div className="mt-2">
+                      <PersonalImpactChip value={personalImpact} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
+                      Stability
+                    </div>
+
+                    <div
+                      className="mt-2 text-base font-bold text-white"
+                      title={forecastStabilityText}
+                    >
+                      {forecastStability}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="hidden h-full w-px bg-white/10 lg:block" />
+
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500 lg:block">
+                    Forecast signals
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-3 gap-3">
+                    <div>
+                      <div className="text-base font-bold text-white">
+                        {topRecommendation.avg_temp ?? "?"}°F
+                      </div>
+                      <div className="mt-1 text-xs font-medium text-slate-500">
+                        Temp
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-base font-bold text-white">
+                        {topRecommendation.wind_max ?? "?"} mph
+                      </div>
+                      <div className="mt-1 text-xs font-medium text-slate-500">
+                        Wind
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-base font-bold text-white">
+                        {topRecommendation.rain_chance ?? "?"}%
+                      </div>
+                      <div className="mt-1 text-xs font-medium text-slate-500">
+                        Rain
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {topRecommendation.activity === "Fishing" &&
+                topRecommendation.best_species && (
+                  <div className="mt-6">
+                    <Badge variant="info">
+                      Best target: {topRecommendation.best_species}
+                      {topRecommendation.best_species_score !== null
+                        ? ` (${topRecommendation.best_species_score})`
+                        : ""}
+                    </Badge>
+                  </div>
+                )}
+
+              {/* Actions */}
+              <div className="mt-8 grid gap-2 sm:flex sm:flex-wrap">
                 <Button
                   onClick={saveRecommendationAsPlan}
                   disabled={savingRecommendationPlan}
+                  className="w-full sm:w-auto"
                 >
                   {savingRecommendationPlan ? "Saving..." : "Save as plan"}
                 </Button>
+
+                <Link
+                  href={recommendationExploreHref}
+                  className="inline-flex w-full items-center justify-center rounded-lg border border-white/5 bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:border-white/10 hover:bg-white/10 hover:text-white sm:w-auto"
+                >
+                  Explore alternatives
+                </Link>
 
                 {topRecommendation.date && topRecommendation.activity && (
                   <RecommendationCalendarLink prediction={topRecommendation} />
@@ -898,29 +979,87 @@ export default function Home() {
 
                 <Link
                   href="/planner"
-                  className="rounded-lg bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
+                  className="inline-flex w-full items-center justify-center rounded-lg border border-white/5 bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:border-white/10 hover:bg-white/10 hover:text-white sm:w-auto"
                 >
                   Open Planner
                 </Link>
               </div>
+
+              {/* Details */}
+              <details className="mt-8 text-sm text-slate-300">
+                <summary className="cursor-pointer font-semibold text-white">
+                  Why this recommendation and how to prepare
+                </summary>
+
+                <div className="mt-4 grid gap-4 rounded-2xl bg-slate-950/45 p-4 shadow-inner shadow-slate-950/30">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                      Why this recommendation
+                    </div>
+
+                    <p className="mt-2 leading-6 text-slate-300">
+                      {buildLumoraTake({
+                        activity: activityLabel(topRecommendation.activity),
+                        date: topRecommendation.date,
+                        score: personalizedScore,
+                        label: topRecommendation.label,
+                        recommendedWindow: recommendationWindow,
+                        forecastConfidenceLabel: forecastStability,
+                        avgTemp: topRecommendation.avg_temp,
+                        windMax: topRecommendation.wind_max,
+                        rainChance: topRecommendation.rain_chance,
+                        bugIndex: topRecommendation.bug_index,
+                        waterTempEst: topRecommendation.water_temp_est,
+                        locationName: topRecommendation.location_name,
+                      })}
+                    </p>
+                  </div>
+
+                  {topRecommendation.gear_notes &&
+                    topRecommendation.gear_notes.trim() !== "" &&
+                    topRecommendation.gear_notes !== "No special gear concerns." && (
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                          How to prepare
+                        </div>
+
+                        <p className="mt-2 leading-6 text-slate-300">
+                          {topRecommendation.gear_notes}
+                        </p>
+                      </div>
+                    )}
+
+                  {topRecommendation.explanation && (
+                    <details className="rounded-xl bg-white/[0.04] p-3">
+                      <summary className="cursor-pointer font-semibold text-slate-200">
+                        Original scoring explanation
+                      </summary>
+
+                      <p className="mt-2 leading-6 text-slate-400">
+                        {topRecommendation.explanation}
+                      </p>
+                    </details>
+                  )}
+                </div>
+              </details>
+
+              {recommendationMessage && (
+                <StatusMessage type="success">
+                  {recommendationMessage}
+                </StatusMessage>
+              )}
+
+              {recommendationError && (
+                <StatusMessage type="error">
+                  {recommendationError}
+                </StatusMessage>
+              )}
             </div>
-
-            {recommendationMessage && (
-              <StatusMessage type="success">
-                {recommendationMessage}
-              </StatusMessage>
-            )}
-
-            {recommendationError && (
-              <StatusMessage type="error">
-                {recommendationError}
-              </StatusMessage>
-            )}
           </Card>
         ) : (
           <EmptyState
             title="No recommendation ready yet"
-            description="Add a saved location, set activity defaults, or rate a few scenarios so Lumora can start giving better suggestions."
+            description="Add a saved location and generate predictions so Lumora can suggest what looks best today or soon."
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 <Link
@@ -1165,7 +1304,7 @@ function RecommendationCalendarLink({
   );
 
   const description = [
-    `Predicted score: ${prediction.predicted_score ?? "N/A"} (${prediction.label ?? "No label"})`,
+    `Personalized score: ${getPersonalizedScore(prediction) ?? "N/A"} (${prediction.label ?? "No label"})`,
     `Recommended window: ${windowText}`,
     "",
     `Why: ${prediction.explanation ?? "No explanation available."}`,
@@ -1178,7 +1317,7 @@ function RecommendationCalendarLink({
     start,
     end,
     description,
-    location: "",
+    location: prediction.location_name ?? "",
   });
 
   return (
@@ -1188,7 +1327,7 @@ function RecommendationCalendarLink({
         prediction.activity ?? "activity",
         prediction.date ?? "date"
       )}
-      className="rounded-lg bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
+      className="inline-flex w-full items-center justify-center rounded-lg border border-white/5 bg-white/5 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition hover:border-white/10 hover:bg-white/10 hover:text-white sm:w-auto"
     >
       Add to calendar
     </a>
@@ -1244,4 +1383,138 @@ function formatFriendlyDate(dateString: string | null | undefined) {
     month: "short",
     day: "numeric",
   });
+}
+
+function getRecommendationWindow(prediction: PredictionRow | null) {
+  return prediction?.recommended_window ?? "Suggested time TBD";
+}
+
+function buildExploreHref(prediction: PredictionRow | null) {
+  if (!prediction?.activity || !prediction?.date) {
+    return "/explore";
+  }
+
+  const params = new URLSearchParams({
+    activity: prediction.activity,
+    date: prediction.date,
+    mode: "day",
+  });
+
+  return `/explore?${params.toString()}`;
+}
+
+function todayString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysString(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function chooseHomeRecommendation(predictions: PredictionRow[]) {
+  const today = todayString();
+  const tomorrow = addDaysString(1);
+
+  function sortBest(rows: PredictionRow[]) {
+    return [...rows].sort(
+      (a, b) =>
+        (b.planning_score ?? b.predicted_score ?? 0) -
+        (a.planning_score ?? a.predicted_score ?? 0)
+    );
+  }
+
+  const todayRows = predictions.filter((prediction) => prediction.date === today);
+
+  if (todayRows.length > 0) {
+    return {
+      prediction: sortBest(todayRows)[0],
+      scope: "today" as const,
+    };
+  }
+
+  const tomorrowRows = predictions.filter(
+    (prediction) => prediction.date === tomorrow
+  );
+
+  if (tomorrowRows.length > 0) {
+    return {
+      prediction: sortBest(tomorrowRows)[0],
+      scope: "tomorrow" as const,
+    };
+  }
+
+  return {
+    prediction: sortBest(predictions)[0] ?? null,
+    scope: "upcoming" as const,
+  };
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getPersonalizedScore(prediction: PredictionRow | null) {
+  if (!prediction) return null;
+
+  return (
+    finiteNumber(prediction.score_components?.calibrated_score) ??
+    finiteNumber(prediction.predicted_score)
+  );
+}
+
+function getPersonalImpact(prediction: PredictionRow | null) {
+  if (!prediction) return null;
+
+  return finiteNumber(prediction.score_components?.preference_adjustment);
+}
+
+function getForecastStabilityScore(prediction: PredictionRow | null) {
+  if (!prediction) return null;
+
+  return (
+    finiteNumber(prediction.score_components?.forecast_confidence) ??
+    finiteNumber(prediction.forecast_confidence)
+  );
+}
+
+function normalizeForecastStabilityLabel({
+  confidence,
+  label,
+}: {
+  confidence: number | null;
+  label: string | null | undefined;
+}) {
+  const normalizedLabel = String(label ?? "").toLowerCase();
+
+  if (normalizedLabel.includes("high")) return "High";
+  if (normalizedLabel.includes("solid")) return "Solid";
+  if (normalizedLabel.includes("watch")) return "Variable";
+  if (normalizedLabel.includes("uncertain") && !normalizedLabel.includes("very")) {
+    return "Uncertain";
+  }
+  if (normalizedLabel.includes("very uncertain")) return "Very uncertain";
+
+  if (confidence === null) return "Not available";
+  if (confidence >= 85) return "High";
+  if (confidence >= 70) return "Solid";
+  if (confidence >= 55) return "Variable";
+  if (confidence >= 40) return "Uncertain";
+  return "Very uncertain";
+}
+
+function forecastStabilityDetail(confidence: number | null) {
+  if (confidence === null) return "Stability unavailable";
+  if (confidence >= 85) return "Stable signal";
+  if (confidence >= 70) return "Useful planning signal";
+  if (confidence >= 55) return "Conditions may shift";
+  if (confidence >= 40) return "Forecast may shift";
+  return "High uncertainty";
+}
+
+function homeScopeEyebrow(scope: "today" | "tomorrow" | "upcoming") {
+  if (scope === "today") return "Highest personalized score today";
+  if (scope === "tomorrow") return "Best personalized option tomorrow";
+  return "Best upcoming personalized option";
 }

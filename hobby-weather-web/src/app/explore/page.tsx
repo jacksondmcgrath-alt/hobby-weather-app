@@ -34,6 +34,15 @@ type SavedLocation = {
   notes: string | null;
 };
 
+type ScoreComponents = {
+  base_score?: number | null;
+  preference_adjustment?: number | null;
+  calibrated_score?: number | null;
+  planning_score?: number | null;
+  forecast_confidence?: number | null;
+  window_score?: number | null;
+};
+
 type LocationRanking = {
   result_id?: string;
   source?: "saved" | "osm";
@@ -62,6 +71,8 @@ type LocationRanking = {
   forecast_confidence?: number | null;
   forecast_confidence_label?: string | null;
   label: string;
+  score_components?: ScoreComponents | null;
+
   recommended_window: string | null;
   window_score: number | null;
   explanation: string;
@@ -370,6 +381,7 @@ export default function ExplorePage() {
             forecast_confidence_label: ranking.forecast_confidence_label ?? null,
             recommended_window: ranking.recommended_window,
             window_score: ranking.window_score,
+            score_components: ranking.score_components ?? null,
         },
         notes: `Created from Explore. Lumora ranked this location for ${ranking.activity}.`,
         });

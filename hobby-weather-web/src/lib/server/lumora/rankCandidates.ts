@@ -62,6 +62,15 @@ function getWeatherBundle({
   return weatherCache.get(key)!;
 }
 
+export type ScoreComponents = {
+  base_score: number;
+  preference_adjustment: number;
+  calibrated_score: number;
+  planning_score: number;
+  forecast_confidence: number;
+  window_score: number | null;
+};
+
 export type ExploreLocationRanking = {
   result_id: string;
   source: LumoraLocationSource;
@@ -82,6 +91,8 @@ export type ExploreLocationRanking = {
   forecast_confidence: number;
   forecast_confidence_label: string;
   label: string;
+
+  score_components: ScoreComponents;
 
   recommended_window: string | null;
   window_score: number | null;
@@ -163,6 +174,15 @@ export async function rankLocationCandidatesForExplore({
           obligations,
         });
 
+        const scoreComponents: ScoreComponents = {
+            base_score: base.score,
+            preference_adjustment: Math.round(adjustment),
+            calibrated_score: score,
+            planning_score: planningScore,
+            forecast_confidence: confidence,
+            window_score: windowRecommendation.windowScore,
+            };
+
         const weatherSnapshot = buildWeatherSnapshot(day);
 
         let explanation = `${
@@ -230,6 +250,8 @@ export async function rankLocationCandidatesForExplore({
           forecast_confidence: confidence,
           forecast_confidence_label: forecastConfidenceLabel(confidence),
           label: scoreLabel(score),
+          
+          score_components: scoreComponents,
 
           recommended_window: windowRecommendation.recommendedWindow,
           window_score: windowRecommendation.windowScore,
@@ -250,6 +272,7 @@ export async function rankLocationCandidatesForExplore({
           use_ndbc_data: candidate.use_ndbc_data,
 
           distance_miles: distanceFromOriginMiles(originLocation, candidate),
+
         });
       }
     } catch (error) {
