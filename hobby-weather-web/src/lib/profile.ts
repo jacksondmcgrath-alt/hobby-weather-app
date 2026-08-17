@@ -74,14 +74,19 @@ export async function getOrCreateProfile(
   user: User,
   preferredDisplayName?: string
 ) {
+  const selectColumns =
+    "user_id,display_name,onboarding_complete,onboarding_completed_at,created_at,updated_at";
+
   const { data: existingProfile, error: selectError } = await supabase
     .from("profiles")
-    .select("user_id,display_name,onboarding_complete,onboarding_completed_at,created_at,updated_at")
+    .select(selectColumns)
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (selectError) {
-    throw new Error(`Could not select profile. ${formatSupabaseError(selectError)}`);
+    throw new Error(
+      `Could not select profile. ${formatSupabaseError(selectError)}`
+    );
   }
 
   if (existingProfile) {
@@ -97,11 +102,38 @@ export async function getOrCreateProfile(
       user_id: user.id,
       display_name: displayName,
     })
-    .select("user_id,display_name,onboarding_complete,onboarding_completed_at,created_at,updated_at")
+    .select(selectColumns)
     .single();
 
   if (insertError) {
-    throw new Error(`Could not insert profile. ${formatSupabaseError(insertError)}`);
+    const typedError = insertError as SupabaseLikeError;
+
+    // Race condition guard:
+    // If another component/request created the profile after our initial select,
+    // re-select and return that profile instead of failing onboarding/login.
+    if (typedError.code === "23505") {
+      const { data: raceProfile, error: raceSelectError } = await supabase
+        .from("profiles")
+        .select(selectColumns)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (raceSelectError) {
+        throw new Error(
+          `Profile already existed, but could not re-select it. ${formatSupabaseError(
+            raceSelectError
+          )}`
+        );
+      }
+
+      if (raceProfile) {
+        return raceProfile as unknown as UserProfile;
+      }
+    }
+
+    throw new Error(
+      `Could not insert profile. ${formatSupabaseError(insertError)}`
+    );
   }
 
   return insertedProfile as unknown as UserProfile;

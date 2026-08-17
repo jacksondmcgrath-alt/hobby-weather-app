@@ -25,6 +25,7 @@ import {
   Button,
   Badge,
   Panel,
+  SafetyNote,
 } from "@/components/ui";
 
 type LocationCandidate = {
@@ -34,33 +35,70 @@ type LocationCandidate = {
   source: string;
 };
 
+type SupabaseLikeError = {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+};
+
+function formatOnboardingError(error: unknown) {
+  if (!error) {
+    return "Could not finish onboarding.";
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object") {
+    const typedError = error as SupabaseLikeError;
+
+    const parts = [
+      typedError.message ? `Message: ${typedError.message}` : null,
+      typedError.details ? `Details: ${typedError.details}` : null,
+      typedError.hint ? `Hint: ${typedError.hint}` : null,
+      typedError.code ? `Code: ${typedError.code}` : null,
+    ].filter(Boolean);
+
+    if (parts.length > 0) {
+      return parts.join(" | ");
+    }
+  }
+
+  return String(error);
+}
+
 const ONBOARDING_STEPS = [
   {
     number: 1,
-    title: "Name",
-    description: "Tell Lumora what to call you.",
+    title: "Profile",
+    description: "Create your personal outdoor forecast profile.",
   },
   {
     number: 2,
     title: "Home location",
-    description: "Choose the first place Lumora should forecast.",
+    description: "Anchor forecasts and nearby discovery to your area.",
   },
   {
     number: 3,
     title: "Activities",
-    description: "Pick what Lumora should recommend.",
+    description: "Choose what Lumora should score for you.",
   },
   {
     number: 4,
     title: "Comfort",
-    description: "Tune your first personalization settings.",
+    description: "Set the first preferences that personalize your scores.",
   },
   {
     number: 5,
     title: "Generate",
-    description: "Create your first recommendations.",
+    description: "Create your first personalized recommendations.",
   },
 ];
+
+const BETA_FEEDBACK_URL =
+  process.env.NEXT_PUBLIC_BETA_FEEDBACK_URL?.trim() ?? "";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -210,8 +248,12 @@ export default function OnboardingPage() {
         .limit(1);
 
     if (existingError) {
-        throw existingError;
-    }
+        throw new Error(
+            `Could not check existing Home location. ${formatOnboardingError(
+            existingError
+            )}`
+        );
+        }
 
     const existingHome = (existingHomeLocations ?? [])[0];
 
@@ -232,8 +274,10 @@ export default function OnboardingPage() {
         .eq("user_id", userId);
 
         if (error) {
-        throw error;
-        }
+            throw new Error(
+                `Could not update Home location. ${formatOnboardingError(error)}`
+            );
+            }
 
         return;
     }
@@ -251,8 +295,10 @@ export default function OnboardingPage() {
     });
 
     if (error) {
-        throw error;
-    }
+        throw new Error(
+            `Could not create Home location. ${formatOnboardingError(error)}`
+        );
+        }
     }
 
   function validateStep(currentStep: number) {
@@ -340,49 +386,89 @@ export default function OnboardingPage() {
         longitude: longitudeNumber,
         });
 
-      await supabase.from("app_preferences").upsert(
+      const { data: existingPreferenceRow, error: existingPreferenceError } =
+        await supabase
+            .from("app_preferences")
+            .select("settings")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+        if (existingPreferenceError) {
+            throw new Error(
+                `Could not load existing preferences. ${formatOnboardingError(
+                existingPreferenceError
+                )}`
+            );
+            }
+
+        const existingSettingsRaw = (
+        existingPreferenceRow as { settings?: unknown } | null
+        )?.settings;
+
+        const existingSettings =
+        existingSettingsRaw &&
+        typeof existingSettingsRaw === "object" &&
+        !Array.isArray(existingSettingsRaw)
+            ? (existingSettingsRaw as Record<string, unknown>)
+            : {};
+
+        const nextSettings = {
+        ...existingSettings,
+        enabled_activities: enabledActivities,
+        bug_tolerance: bugTolerance,
+        rain_caution: rainCaution,
+        general_heat_sensitivity: heatSensitivity,
+        wind_sensitivity: windSensitivity,
+        running_heat_sensitivity: heatSensitivity,
+        running_wind_sensitivity: windSensitivity,
+        };
+
+        const { error: preferencesError } = await supabase.from("app_preferences").upsert(
         {
             user_id: user.id,
-            settings: {
-                enabled_activities: enabledActivities,
-                bug_tolerance: bugTolerance,
-                rain_caution: rainCaution,
-                general_heat_sensitivity: heatSensitivity,
-                wind_sensitivity: windSensitivity,
-                running_heat_sensitivity: heatSensitivity,
-                running_wind_sensitivity: windSensitivity,
-                },
+            settings: nextSettings,
         },
         {
             onConflict: "user_id",
         }
         );
 
-      await supabase
+        if (preferencesError) {
+            throw new Error(
+                `Could not save preferences. ${formatOnboardingError(preferencesError)}`
+            );
+            }
+
+        setMessage("Setup saved. Lumora is generating your first recommendations...");
+
+        await triggerPredictionGeneration({
+        force: true,
+        reason: "onboarding_completed",
+        });
+
+        const { error: profileCompleteError } = await supabase
         .from("profiles")
         .update({
-          onboarding_complete: true,
-          onboarding_completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+            onboarding_complete: true,
+            onboarding_completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
         })
         .eq("user_id", user.id);
 
-      setMessage("Setup saved. Lumora is generating your first recommendations...");
+        if (profileCompleteError) {
+            throw new Error(
+                `Could not mark onboarding complete. ${formatOnboardingError(
+                profileCompleteError
+                )}`
+            );
+            }
 
-      await triggerPredictionGeneration({
-        force: true,
-        reason: "onboarding_completed",
-      });
-
-      router.push("/");
+        router.push("/");
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not finish onboarding."
-      );
-      setSaving(false);
-    }
+        console.error("Could not finish onboarding:", error);
+        setErrorMessage(formatOnboardingError(error));
+        setSaving(false);
+        }
   }
 
   if (authLoading) {
@@ -411,8 +497,44 @@ export default function OnboardingPage() {
       <PageHeader
         eyebrow="First setup"
         title="Welcome to Lumora"
-        description="Set up the basics so Lumora can generate useful recommendations right away."
-      />
+        description="Set up your personal outdoor forecast so Lumora can score activities, timing, and places around you."
+        />
+
+        <Card className="mt-8">
+            <SectionTitle
+                title="Personalized weather for outdoor plans"
+                description="Lumora combines your location, activities, comfort preferences, and forecast conditions to recommend what to do, when to go, where to go, and how to prepare."
+            />
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl bg-white/[0.04] p-4 ring-1 ring-white/[0.06]">
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Personalized
+                </div>
+                <div className="mt-2 text-sm leading-6 text-slate-300">
+                    Scores shift based on your activities, places, schedule, and comfort.
+                </div>
+                </div>
+
+                <div className="rounded-xl bg-white/[0.04] p-4 ring-1 ring-white/[0.06]">
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Evidence-based
+                </div>
+                <div className="mt-2 text-sm leading-6 text-slate-300">
+                    Recommendations use forecast signals, score components, and stability.
+                </div>
+                </div>
+
+                <div className="rounded-xl bg-white/[0.04] p-4 ring-1 ring-white/[0.06]">
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Actionable
+                </div>
+                <div className="mt-2 text-sm leading-6 text-slate-300">
+                    Save plans, explore places, and log what actually happened.
+                </div>
+                </div>
+            </div>
+            </Card>
 
       {message && (
         <StatusMessage type="success">
@@ -432,12 +554,12 @@ export default function OnboardingPage() {
         {step === 1 && (
             <Card>
             <SectionTitle
-                title="1. What should Lumora call you?"
-                description="This is used for greetings and assistant-style recommendations."
-            />
+                title="1. Create your forecast profile"
+                description="Tell Lumora what to call you. This name is used for greetings and personalized recommendations."
+                />
 
             <label className="mt-5 grid gap-1">
-                <span className="text-sm text-slate-300">Display name</span>
+                <span className="text-sm text-slate-300">What should Lumora call you?</span>
                 <input
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
@@ -450,13 +572,13 @@ export default function OnboardingPage() {
             <Card>
             <SectionTitle
                 title="2. Add your home forecast location"
-                description="Start with your home area. You can add activity-specific locations later."
+                description="Your Home location anchors local forecasts, today’s recommendation, and nearby discovery. You can add activity-specific places later."
                 action={
-                <Button type="button" variant="ghost" onClick={useBrowserLocation}>
+                    <Button type="button" variant="ghost" onClick={useBrowserLocation}>
                     Use my current location
-                </Button>
+                    </Button>
                 }
-            />
+                />
 
             <Panel className="mt-5">
                 <div className="grid gap-3">
@@ -536,6 +658,12 @@ export default function OnboardingPage() {
                 />
                 </label>
             </div>
+
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+                You can use an approximate area if you prefer. Lumora uses these coordinates
+                for forecasts and nearby discovery, not live tracking.
+                </p>
+
             </Card>
         )}
 
@@ -543,8 +671,16 @@ export default function OnboardingPage() {
             <Card>
             <SectionTitle
                 title="3. Choose activities"
-                description="Pick the activities Lumora should recommend. You can change these anytime."
-            />
+                description="Pick the activities you actually want Lumora to score. You can change these anytime."
+                />
+
+                <div className="mt-4 rounded-xl bg-white/[0.04] p-4 text-sm leading-6 text-slate-300 ring-1 ring-white/[0.06]">
+                    <span className="font-semibold text-white">
+                        {enabledActivities.length}
+                    </span>{" "}
+                    activities selected. For beta testing, starting with 3–8 activities usually
+                    makes recommendations easier to understand.
+                    </div>
 
             <div className="mt-5 grid gap-5">
                 {Object.entries(activityGroups).map(([category, activities]) => (
@@ -595,8 +731,13 @@ export default function OnboardingPage() {
             <Card>
                 <SectionTitle
                     title="4. Tune your comfort"
-                    description="These quick settings help Lumora personalize your first recommendations. You can fine-tune more later."
-                />
+                    description="These quick sliders shape your first personalized scores. You can fine-tune more preferences later."
+                    />
+
+                    <p className="mt-4 text-sm leading-6 text-slate-300">
+                        Preferences act as adjustments, not absolute rules. Lumora still weighs the
+                        forecast, activity profile, and stability.
+                        </p>
 
                 <div className="mt-5 grid gap-5">
                     <label className="grid gap-2">
@@ -705,26 +846,27 @@ export default function OnboardingPage() {
         {step === 5 && (
             <Card>
                 <SectionTitle
-                title="5. Generate recommendations"
-                description="Lumora will use your setup to create your first forecast windows."
-                />
+                    title="5. Generate your first recommendations"
+                    description="Lumora will score your selected activities using your Home location, comfort preferences, and the forecast."
+                    />
 
                 <Panel className="mt-5">
                 <div className="grid gap-4">
                     <div>
+
                     <div className="text-sm font-semibold text-white">
-                        You’re ready to generate recommendations.
+                    You’re ready to create your first personalized forecast.
                     </div>
 
                     <p className="mt-2 text-sm leading-6 text-slate-300">
-                        Lumora will use your name, home forecast location, selected
-                        activities, and comfort preferences to create personalized activity
-                        windows. This may take a few seconds.
+                    After setup, Home will show the strongest personalized option for today or
+                    soon. Planner will show the broader forecast window.
                     </p>
+
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-slate-700/70 bg-white/[0.04] p-3">
+                    <div className="rounded-xl bg-white/[0.04] p-3 ring-1 ring-white/[0.06]">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Location
                         </div>
@@ -733,7 +875,7 @@ export default function OnboardingPage() {
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-700/70 bg-white/[0.04] p-3">
+                    <div className="rounded-xl bg-white/[0.04] p-3 ring-1 ring-white/[0.06]">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Activities
                         </div>
@@ -742,7 +884,7 @@ export default function OnboardingPage() {
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-700/70 bg-white/[0.04] p-3">
+                    <div className="rounded-xl bg-white/[0.04] p-3 ring-1 ring-white/[0.06]">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Preferences
                         </div>
@@ -751,6 +893,46 @@ export default function OnboardingPage() {
                         </div>
                     </div>
                     </div>
+
+                    <div className="rounded-2xl bg-slate-950/45 p-4 ring-1 ring-white/[0.06]">
+                        <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                            After setup
+                        </div>
+
+                        <div className="mt-3 grid gap-3 text-sm leading-6 text-slate-300">
+                            <div>
+                            <span className="font-semibold text-white">1.</span> Check Home for
+                            today’s personalized recommendation.
+                            </div>
+
+                            <div>
+                            <span className="font-semibold text-white">2.</span> Use Explore to
+                            compare places or discover nearby options.
+                            </div>
+
+                            <div>
+                            <span className="font-semibold text-white">3.</span> Save one plan and
+                            log how it went so Lumora can learn.
+                            </div>
+
+                            {BETA_FEEDBACK_URL && (
+                            <div>
+                                <span className="font-semibold text-white">4.</span>{" "}
+                                <a
+                                href={BETA_FEEDBACK_URL}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-semibold text-[rgb(var(--brand-rgb))] hover:underline"
+                                >
+                                Send feedback
+                                </a>{" "}
+                                if something feels wrong, confusing, or surprisingly useful.
+                            </div>
+                            )}
+                        </div>
+                        </div>
+
+                    <SafetyNote />
                 </div>
                 </Panel>
             </Card>
@@ -793,7 +975,7 @@ export default function OnboardingPage() {
                     onClick={finishOnboarding}
                     disabled={saving}
                     >
-                    {saving ? "Setting up..." : "Finish setup"}
+                    {saving ? "Generating..." : "Generate recommendations"}
                     </Button>
                 )}
                 </div>

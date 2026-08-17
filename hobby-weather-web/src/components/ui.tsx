@@ -81,12 +81,14 @@ export function Card({
 }) {
   return (
     <section
-      className={`relative overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/90 p-5 shadow-xl shadow-slate-950/35 backdrop-blur-sm ${
-        hover ? "transition hover:-translate-y-0.5 hover:border-slate-700 hover:bg-slate-900" : ""
+      className={`relative overflow-hidden rounded-2xl bg-slate-900/82 p-5 shadow-xl shadow-slate-950/32 ring-1 ring-white/[0.055] backdrop-blur-sm ${
+        hover
+          ? "transition hover:-translate-y-0.5 hover:bg-slate-900/90 hover:ring-white/10"
+          : ""
       } ${className}`}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgb(var(--brand-rgb)_/_0.06),transparent_34%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgb(var(--brand-rgb)_/_0.045),transparent_34%)]" />
 
       <div className="relative">
         {children}
@@ -104,9 +106,9 @@ export function Panel({
 }) {
   return (
     <div
-      className={`relative overflow-hidden rounded-xl border border-slate-700/70 bg-white/[0.045] p-4 shadow-sm shadow-slate-950/20 ${className}`}
+      className={`relative overflow-hidden rounded-xl bg-white/[0.04] p-4 shadow-sm shadow-slate-950/18 ring-1 ring-white/[0.055] ${className}`}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/8 to-transparent" />
 
       <div className="relative">
         {children}
@@ -193,7 +195,7 @@ export function Badge({
     info: "bg-[rgb(var(--brand-rgb))] text-[#030716]",
     warning: "bg-amber-500 text-slate-950",
     danger: "bg-red-600 text-white",
-    neutral: "bg-slate-700 text-slate-200",
+    neutral: "bg-white/[0.075] text-slate-200 ring-1 ring-white/[0.06]",
   };
 
   return (
@@ -303,7 +305,7 @@ export function WeatherStat({
   icon?: ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-slate-700/70 bg-white/[0.04] px-3 py-2">
+    <div className="rounded-xl bg-white/[0.04] px-3 py-2 shadow-sm shadow-slate-950/10 ring-1 ring-white/[0.045]">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
         {icon && <span>{icon}</span>}
         <span>{label}</span>
@@ -354,7 +356,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/70 p-6 text-center">
+    <div className="rounded-2xl bg-slate-900/62 p-6 text-center shadow-inner shadow-slate-950/20 ring-1 ring-white/[0.06]">
       <h3 className="text-lg font-semibold text-white">
         {title}
       </h3>
@@ -386,14 +388,14 @@ export function Callout({
   action?: ReactNode;
 }) {
   const styles = {
-    info: "border-sky-500/20 bg-sky-500/10 text-sky-100",
-    success: "border-green-500/20 bg-green-500/10 text-green-100",
-    warning: "border-amber-500/25 bg-amber-500/10 text-amber-100",
-    danger: "border-red-500/25 bg-red-500/10 text-red-100",
+    info: "bg-sky-500/10 text-sky-100 ring-sky-300/20",
+    success: "bg-green-500/10 text-green-100 ring-green-300/20",
+    warning: "bg-amber-500/10 text-amber-100 ring-amber-300/25",
+    danger: "bg-red-500/10 text-red-100 ring-red-300/25",
   };
 
   return (
-    <div className={`rounded-2xl border p-4 ${styles[type]}`}>
+    <div className={`rounded-2xl p-4 ring-1 ${styles[type]}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           {title && (
@@ -414,7 +416,7 @@ export function Callout({
 }
 
 function clampMetric(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
     return null;
   }
 
@@ -422,45 +424,45 @@ function clampMetric(value: number | null | undefined) {
 }
 
 function formatSignedPoints(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "—";
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "Not available";
   }
 
   const rounded = Math.round(Number(value));
 
   if (rounded > 0) return `+${rounded} pts`;
-  if (rounded < 0) return `${rounded} pts`;
+  if (rounded < 0) return `−${Math.abs(rounded)} pts`;
   return "0 pts";
 }
 
 function personalImpactLabel(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "Unknown";
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "";
   }
 
   const rounded = Math.round(Number(value));
 
-  if (rounded >= 2) return "Boost";
-  if (rounded <= -2) return "Caution";
+  if (rounded > 0) return "Boost";
+  if (rounded < 0) return "Reduced";
   return "Neutral";
 }
 
 function personalImpactStyles(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "border-slate-700 bg-slate-800/80 text-slate-300";
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "border-slate-700/70 bg-slate-900/80 text-slate-400";
   }
 
   const rounded = Math.round(Number(value));
 
-  if (rounded >= 2) {
-    return "border-[rgb(var(--brand-warm-soft-rgb)_/_0.35)] bg-[rgb(var(--brand-warm-rgb)_/_0.14)] text-[rgb(var(--brand-warm-soft-rgb))]";
+  if (rounded > 0) {
+    return "border-[rgb(var(--brand-warm-soft-rgb)_/_0.34)] bg-[rgb(var(--brand-warm-rgb)_/_0.13)] text-[rgb(var(--brand-warm-soft-rgb))] shadow-[0_0_18px_rgb(var(--brand-warm-rgb)_/_0.08)]";
   }
 
-  if (rounded <= -2) {
-    return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  if (rounded < 0) {
+    return "border-[rgb(var(--brand-soft-rgb)_/_0.25)] bg-[rgb(var(--brand-soft-rgb)_/_0.09)] text-slate-200";
   }
 
-  return "border-slate-700 bg-white/[0.05] text-slate-300";
+  return "border-slate-700/70 bg-white/[0.05] text-slate-300";
 }
 
 export function LumoraScoreBar({
@@ -504,6 +506,7 @@ export function LumoraScoreBar({
           "aria-valuemin": 0,
           "aria-valuemax": 100,
           "aria-valuenow": normalized,
+          "aria-valuetext": `${label}: ${normalized}`,
         }
       : {
           role: "img" as const,
@@ -536,11 +539,11 @@ export function LumoraScoreBar({
 
       <div
         {...meterProps}
-        className={`relative mt-3 overflow-hidden rounded-full bg-slate-800/90 ${activeSize.bar}`}
+        className={`relative mt-3 overflow-hidden rounded-full bg-slate-900/95 ring-1 ring-white/5 ${activeSize.bar}`}
       >
         {normalized !== null ? (
           <>
-            <div className="absolute inset-0 bg-[linear-gradient(90deg,rgb(15_23_42),rgb(30_41_59),rgb(67_56_202),rgb(142_167_255),rgb(183_167_255),rgb(255_170_138),rgb(255_226_160))]" />
+            <div className="absolute inset-0 bg-[linear-gradient(90deg,rgb(15_23_42),rgb(30_41_59),rgb(49_46_129),rgb(92_91_255),rgb(142_167_255),rgb(183_167_255),rgb(255_170_138),rgb(255_226_160))]" />
 
             <div
               className="absolute inset-y-0 right-0 bg-slate-950/95"
@@ -549,7 +552,11 @@ export function LumoraScoreBar({
               }}
             />
 
-            <div className="absolute inset-0 bg-white/10 mix-blend-soft-light" />
+            <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgb(255_255_255/0.18),transparent_55%,rgb(0_0_0/0.18))]" />
+
+            {normalized >= 80 && (
+              <div className="absolute inset-y-[-0.35rem] right-0 w-24 bg-[rgb(var(--brand-warm-rgb)_/_0.18)] blur-xl" />
+            )}
           </>
         ) : (
           <div className="absolute inset-0 bg-[linear-gradient(90deg,rgb(30_41_59),rgb(51_65_85))]" />
@@ -609,16 +616,16 @@ export function DecisionStrip({
 }) {
   const accents = {
     window:
-      "from-[rgb(var(--brand-soft-rgb)_/_0.52)] to-[rgb(var(--brand-rgb)_/_0.20)]",
+      "from-[rgb(var(--brand-soft-rgb)_/_0.50)] to-[rgb(var(--brand-rgb)_/_0.16)]",
     personal:
-      "from-[rgb(var(--brand-warm-rgb)_/_0.50)] to-[rgb(var(--brand-warm-soft-rgb)_/_0.20)]",
-    stability: "from-sky-300/45 to-[rgb(var(--brand-rgb)_/_0.18)]",
-    neutral: "from-slate-500/40 to-slate-700/20",
+      "from-[rgb(var(--brand-warm-rgb)_/_0.46)] to-[rgb(var(--brand-warm-soft-rgb)_/_0.16)]",
+    stability: "from-sky-300/40 to-[rgb(var(--brand-rgb)_/_0.15)]",
+    neutral: "from-slate-500/35 to-slate-700/15",
   };
 
   return (
     <div
-      className={`grid overflow-hidden rounded-2xl bg-slate-950/45 shadow-inner shadow-slate-950/30 ${
+      className={`grid overflow-hidden rounded-2xl bg-slate-950/42 shadow-inner shadow-slate-950/30 ring-1 ring-white/5 ${
         mobilePriority === "first" ? "grid-cols-2 sm:grid-cols-3" : "sm:grid-cols-3"
       }`}
     >
@@ -662,6 +669,28 @@ export function DecisionStrip({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+export function SafetyNote({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <div
+      className={`rounded-2xl bg-sky-500/10 p-4 text-sm leading-6 text-sky-100 ring-1 ring-sky-300/20 ${className}`}
+    >
+      <div className="font-semibold text-white">
+        Planning aid, not a safety authority
+      </div>
+
+      <p className="mt-1 text-sky-100/90">
+        Lumora helps interpret forecast conditions for planning. Always check
+        local conditions, official alerts, site-specific risks, and your own
+        judgment before heading out.
+      </p>
     </div>
   );
 }

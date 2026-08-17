@@ -31,6 +31,9 @@ const ADMIN_NAV_ITEMS = [
   { href: "/exports", label: "Exports" },
 ];
 
+const BETA_FEEDBACK_URL =
+  process.env.NEXT_PUBLIC_BETA_FEEDBACK_URL?.trim() ?? "";
+
 function isAdminEmail(email: string | undefined) {
   if (!email) return false;
 
@@ -192,6 +195,19 @@ function MoreMenuContent({
         ))}
       </MenuSection>
 
+      {BETA_FEEDBACK_URL && (
+        <>
+          <div className="my-2 h-px bg-slate-800" />
+
+          <MenuSection title="Beta">
+            <ExternalMenuLink
+              href={BETA_FEEDBACK_URL}
+              label="Send feedback"
+            />
+          </MenuSection>
+        </>
+      )}
+
       {isAdmin && (
         <>
           <div className="my-2 h-px bg-slate-800" />
@@ -209,6 +225,25 @@ function MoreMenuContent({
         </>
       )}
     </>
+  );
+}
+
+function ExternalMenuLink({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-2 rounded-xl border border-transparent px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-[rgb(var(--season-rgb)_/_0.12)] hover:text-white"
+    >
+      {label}
+    </a>
   );
 }
 

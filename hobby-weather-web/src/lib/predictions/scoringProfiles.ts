@@ -1451,87 +1451,93 @@ export function scoreActivity(activity: string, day: DailyWeather): ScoredActivi
     }
 
     case "camping": {
-        const tempScore = rangeScore(day.avgTemp, 58, 80, 38, 94);
+        const tempScore = rangeScore(day.avgTemp, 55, 82, 35, 96);
+
         const rainScore = clampScore(
-            lowIsGoodScore(day.rainChance, 25, 80) * 0.35 +
-            lowIsGoodScore(day.rainIntensityIndex, 25, 85) * 0.4 +
-            lowIsGoodScore(day.precipHours, 2, 10) * 0.25
+            lowIsGoodScore(day.rainChance, 30, 82) * 0.3 +
+            lowIsGoodScore(day.rainIntensityIndex, 35, 90) * 0.45 +
+            lowIsGoodScore(day.precipHours, 3, 12) * 0.25
         );
-        const groundScore = lowIsGoodScore(day.groundWetnessIndex, 50, 92);
-        const bugComfort = lowIsGoodScore(day.bugIndex, 40, 88);
-        const windScore = lowIsGoodScore(day.windMax, 16, 36);
-        const gustScore = lowIsGoodScore(day.gustMax, 26, 44);
+
+        const groundScore = lowIsGoodScore(day.groundWetnessIndex, 58, 94);
+        const bugComfort = lowIsGoodScore(day.bugIndex, 48, 90);
+        const windScore = lowIsGoodScore(day.windMax, 18, 38);
+        const gustScore = lowIsGoodScore(day.gustMax, 30, 48);
         const stormScore = day.stormSafety;
 
         score =
-            tempScore * 0.24 +
-            rainScore * 0.22 +
-            groundScore * 0.16 +
-            bugComfort * 0.14 +
+            tempScore * 0.25 +
+            rainScore * 0.2 +
+            groundScore * 0.13 +
+            bugComfort * 0.12 +
             windScore * 0.08 +
             gustScore * 0.04 +
-            stormScore * 0.12;
+            stormScore * 0.18;
 
-        if (day.avgTemp >= 58 && day.avgTemp <= 80) {
+        if (day.avgTemp >= 55 && day.avgTemp <= 82) {
             reasons.push("comfortable camping temperatures");
         }
 
-        if (day.rainChance <= 25 && day.rainIntensityIndex <= 25) {
+        if (day.rainChance <= 30 && day.rainIntensityIndex <= 35) {
             reasons.push("limited rain impact");
-        } else if (day.rainIntensityIndex >= 55 || day.precipHours >= 6) {
+        } else if (day.rainIntensityIndex >= 60 || day.precipHours >= 8) {
             reasons.push("rain could affect camp comfort");
         }
 
-        if (day.groundWetnessIndex >= 65) {
+        if (day.groundWetnessIndex >= 70) {
             reasons.push("ground conditions may be damp");
         }
 
-        if (day.bugIndex >= 60) {
+        if (day.bugIndex >= 65) {
             reasons.push("bugs may be annoying");
         }
 
-        if (day.windMax >= 22 || day.gustMax >= 32) {
+        if (day.windMax >= 24 || day.gustMax >= 34) {
             reasons.push("wind may affect camp setup");
         }
 
-        if (day.rainIntensityIndex >= 75 || day.groundWetnessIndex >= 88) {
-            score = Math.min(score, 55);
+        if (day.rainIntensityIndex >= 82 || day.groundWetnessIndex >= 92) {
+            score = Math.min(score, 58);
             reasons.push("wet conditions limit camping reliability");
+        } else if (day.rainIntensityIndex >= 65 || day.groundWetnessIndex >= 82) {
+            score = Math.min(score, 72);
+            reasons.push("damp conditions reduce camping reliability");
         }
 
-        if (day.stormSafety < 55 || day.stormInstabilityIndex >= 75) {
+        if (day.stormSafety < 55 || day.stormInstabilityIndex >= 78) {
             score = Math.min(score, 45);
             reasons.push("storm risk limits camping safety");
         }
 
         const excellentCampingConditions =
-            day.avgTemp >= 62 &&
-            day.avgTemp <= 76 &&
-            day.rainChance <= 15 &&
-            day.rainIntensityIndex <= 20 &&
-            day.groundWetnessIndex <= 35 &&
-            day.bugIndex <= 45 &&
-            day.windMax <= 12 &&
-            day.gustMax <= 22 &&
-            day.stormSafety >= 90 &&
-            day.stormInstabilityIndex <= 25;
+            day.avgTemp >= 60 &&
+            day.avgTemp <= 78 &&
+            day.rainChance <= 18 &&
+            day.rainIntensityIndex <= 25 &&
+            day.groundWetnessIndex <= 45 &&
+            day.bugIndex <= 55 &&
+            day.windMax <= 15 &&
+            day.gustMax <= 26 &&
+            day.stormSafety >= 88 &&
+            day.stormInstabilityIndex <= 30;
 
         const goodCampingConditions =
-            day.avgTemp >= 55 &&
-            day.avgTemp <= 82 &&
-            day.rainChance <= 30 &&
-            day.rainIntensityIndex <= 40 &&
-            day.groundWetnessIndex <= 60 &&
-            day.bugIndex <= 65 &&
-            day.windMax <= 18 &&
-            day.stormSafety >= 80 &&
-            day.stormInstabilityIndex <= 45;
+            day.avgTemp >= 54 &&
+            day.avgTemp <= 84 &&
+            day.rainChance <= 35 &&
+            day.rainIntensityIndex <= 45 &&
+            day.groundWetnessIndex <= 68 &&
+            day.bugIndex <= 70 &&
+            day.windMax <= 20 &&
+            day.stormSafety >= 78 &&
+            day.stormInstabilityIndex <= 50;
 
         score = capScoreByConditionTier({
             score,
             excellent: excellentCampingConditions,
             good: goodCampingConditions,
-            goodCap: 91,
+            excellentCap: 94,
+            goodCap: 89,
             ordinaryCap: 82,
         });
 
@@ -2245,121 +2251,136 @@ export function scoreActivity(activity: string, day: DailyWeather): ScoredActivi
         }
 
     case "picnic": {
-        const tempScore = rangeScore(day.avgTemp, 60, 82, 42, 96);
+        const tempScore = rangeScore(day.avgTemp, 58, 84, 40, 98);
+
         const rainScore = clampScore(
-            lowIsGoodScore(day.rainChance, 25, 78) * 0.45 +
-            lowIsGoodScore(day.rainIntensityIndex, 25, 85) * 0.35 +
-            lowIsGoodScore(day.daytimePrecipHours, 1, 7) * 0.2
+            lowIsGoodScore(day.rainChance, 32, 82) * 0.4 +
+            lowIsGoodScore(day.rainIntensityIndex, 35, 90) * 0.4 +
+            lowIsGoodScore(day.daytimePrecipHours, 2, 8) * 0.2
         );
-        const windScore = lowIsGoodScore(day.windMax, 15, 32);
-        const bugComfort = lowIsGoodScore(day.bugIndex, 50, 90);
-        const groundScore = lowIsGoodScore(day.groundWetnessIndex, 55, 90);
-        const pollenComfort = lowIsGoodScore(day.pollenIndex, 65, 96);
+
+        const windScore = lowIsGoodScore(day.windMax, 17, 34);
+        const bugComfort = lowIsGoodScore(day.bugIndex, 58, 92);
+        const groundScore = lowIsGoodScore(day.groundWetnessIndex, 62, 92);
+        const pollenComfort = lowIsGoodScore(day.pollenIndex, 70, 98);
         const stormScore = day.stormSafety;
 
         score =
-            tempScore * 0.28 +
-            rainScore * 0.22 +
+            tempScore * 0.3 +
+            rainScore * 0.2 +
             windScore * 0.1 +
-            bugComfort * 0.12 +
-            groundScore * 0.12 +
+            bugComfort * 0.1 +
+            groundScore * 0.1 +
             pollenComfort * 0.04 +
-            stormScore * 0.12;
+            stormScore * 0.16;
 
-        if (day.avgTemp >= 60 && day.avgTemp <= 82) {
+        if (day.avgTemp >= 58 && day.avgTemp <= 84) {
             reasons.push("comfortable picnic temperatures");
         }
 
-        if (day.rainChance <= 25 && day.rainIntensityIndex <= 25) {
+        if (day.rainChance <= 32 && day.rainIntensityIndex <= 35) {
             reasons.push("limited rain impact");
-        } else if (day.rainIntensityIndex >= 50) {
+        } else if (day.rainIntensityIndex >= 55) {
             reasons.push("rain may affect picnic comfort");
         }
 
-        if (day.groundWetnessIndex >= 70) {
+        if (day.groundWetnessIndex >= 75) {
             reasons.push("ground may be damp");
         }
 
-        if (day.bugIndex >= 65) {
+        if (day.bugIndex >= 70) {
             reasons.push("bugs may be noticeable");
         }
 
-        if (day.windMax >= 22) {
+        if (day.windMax >= 24) {
             reasons.push("wind may reduce comfort");
         }
 
-        if (day.stormSafety < 55 || day.stormInstabilityIndex >= 75) {
+        if (day.stormSafety < 55 || day.stormInstabilityIndex >= 78) {
             score = Math.min(score, 50);
             reasons.push("storm risk lowers reliability");
         }
 
+        if (day.rainIntensityIndex >= 78 || day.daytimePrecipHours >= 7) {
+            score = Math.min(score, 62);
+            reasons.push("rain timing limits picnic reliability");
+        }
+
         const excellentPicnicConditions =
-            day.avgTemp >= 65 &&
-            day.avgTemp <= 78 &&
-            day.rainChance <= 12 &&
-            day.rainIntensityIndex <= 15 &&
-            day.groundWetnessIndex <= 35 &&
-            day.bugIndex <= 45 &&
-            day.windMax <= 12 &&
-            day.stormSafety >= 90;
+            day.avgTemp >= 63 &&
+            day.avgTemp <= 80 &&
+            day.rainChance <= 22 &&
+            day.rainIntensityIndex <= 30 &&
+            day.daytimePrecipHours <= 2 &&
+            day.groundWetnessIndex <= 52 &&
+            day.bugIndex <= 62 &&
+            day.windMax <= 15 &&
+            day.stormSafety >= 88 &&
+            day.stormInstabilityIndex <= 30;
 
         const goodPicnicConditions =
-            day.avgTemp >= 58 &&
-            day.avgTemp <= 84 &&
-            day.rainChance <= 28 &&
-            day.rainIntensityIndex <= 35 &&
-            day.groundWetnessIndex <= 60 &&
-            day.bugIndex <= 65 &&
-            day.windMax <= 18 &&
-            day.stormSafety >= 80;
+            day.avgTemp >= 56 &&
+            day.avgTemp <= 86 &&
+            day.rainChance <= 40 &&
+            day.rainIntensityIndex <= 50 &&
+            day.daytimePrecipHours <= 4 &&
+            day.groundWetnessIndex <= 72 &&
+            day.bugIndex <= 76 &&
+            day.windMax <= 22 &&
+            day.stormSafety >= 78 &&
+            day.stormInstabilityIndex <= 50;
 
         score = capScoreByConditionTier({
             score,
             excellent: excellentPicnicConditions,
             good: goodPicnicConditions,
-            goodCap: 91,
-            ordinaryCap: 84,
+            excellentCap: 94,
+            goodCap: 90,
+            ordinaryCap: 86,
         });
 
         break;
         }
 
     case "gardening": {
-        const tempScore = rangeScore(day.avgTemp, 48, 78, 34, 94);
+        const tempScore = rangeScore(day.avgTemp, 46, 80, 32, 96);
+
+        // Some moisture can be useful for gardening, but heavy rain is disruptive.
         const rainScore =
-            day.rainIntensityIndex <= 35
-            ? 88
-            : lowIsGoodScore(day.rainIntensityIndex, 35, 90);
-        const windScore = lowIsGoodScore(day.windMax, 18, 36);
-        const heatScore = lowIsGoodScore(day.apparentTemp, 86, 98);
-        const groundScore = rangeScore(day.groundWetnessIndex, 20, 65, 0, 95);
-        const pollenComfort = lowIsGoodScore(day.pollenIndex, 70, 98);
+            day.rainIntensityIndex <= 40
+            ? 90
+            : lowIsGoodScore(day.rainIntensityIndex, 40, 92);
+
+        const windScore = lowIsGoodScore(day.windMax, 20, 38);
+        const heatScore = lowIsGoodScore(day.apparentTemp, 88, 100);
+        const groundScore = rangeScore(day.groundWetnessIndex, 15, 72, 0, 98);
+        const pollenComfort = lowIsGoodScore(day.pollenIndex, 75, 100);
         const stormScore = day.stormSafety;
 
         score =
-            tempScore * 0.28 +
-            rainScore * 0.12 +
-            windScore * 0.16 +
-            heatScore * 0.12 +
-            groundScore * 0.16 +
+            tempScore * 0.3 +
+            rainScore * 0.1 +
+            windScore * 0.14 +
+            heatScore * 0.1 +
+            groundScore * 0.18 +
             pollenComfort * 0.04 +
-            stormScore * 0.12;
+            stormScore * 0.14;
 
-        if (day.avgTemp >= 48 && day.avgTemp <= 78) {
+        if (day.avgTemp >= 46 && day.avgTemp <= 80) {
             reasons.push("comfortable gardening temperatures");
         }
 
-        if (day.groundWetnessIndex >= 20 && day.groundWetnessIndex <= 65) {
+        if (day.groundWetnessIndex >= 15 && day.groundWetnessIndex <= 72) {
             reasons.push("workable ground moisture");
-        } else if (day.groundWetnessIndex > 80) {
+        } else if (day.groundWetnessIndex > 85) {
             reasons.push("ground may be too wet");
         }
 
-        if (day.windMax >= 22) {
+        if (day.windMax >= 24) {
             reasons.push("wind may make gardening harder");
         }
 
-        if (day.apparentTemp >= 90) {
+        if (day.apparentTemp >= 92) {
             reasons.push("heat may reduce comfort");
         }
 
@@ -2367,35 +2388,43 @@ export function scoreActivity(activity: string, day: DailyWeather): ScoredActivi
             reasons.push("rain intensity may interrupt outdoor work");
         }
 
-        if (day.stormSafety < 55 || day.stormInstabilityIndex >= 75) {
+        if (day.stormSafety < 55 || day.stormInstabilityIndex >= 78) {
             score = Math.min(score, 50);
             reasons.push("storm risk lowers reliability");
         }
 
+        if (day.rainIntensityIndex >= 80) {
+            score = Math.min(score, 65);
+            reasons.push("heavy rain limits gardening reliability");
+        }
+
         const excellentGardeningConditions =
-            day.avgTemp >= 55 &&
-            day.avgTemp <= 74 &&
-            day.apparentTemp <= 80 &&
-            day.windMax <= 12 &&
-            day.groundWetnessIndex >= 25 &&
-            day.groundWetnessIndex <= 55 &&
-            day.rainIntensityIndex <= 25 &&
-            day.stormSafety >= 90;
+            day.avgTemp >= 50 &&
+            day.avgTemp <= 78 &&
+            day.apparentTemp <= 84 &&
+            day.windMax <= 16 &&
+            day.groundWetnessIndex >= 12 &&
+            day.groundWetnessIndex <= 70 &&
+            day.rainIntensityIndex <= 40 &&
+            day.stormSafety >= 88 &&
+            day.stormInstabilityIndex <= 30;
 
         const goodGardeningConditions =
-            day.avgTemp >= 48 &&
-            day.avgTemp <= 82 &&
-            day.windMax <= 18 &&
-            day.groundWetnessIndex <= 75 &&
-            day.rainIntensityIndex <= 45 &&
-            day.stormSafety >= 80;
+            day.avgTemp >= 44 &&
+            day.avgTemp <= 86 &&
+            day.windMax <= 22 &&
+            day.groundWetnessIndex <= 84 &&
+            day.rainIntensityIndex <= 55 &&
+            day.stormSafety >= 78 &&
+            day.stormInstabilityIndex <= 50;
 
         score = capScoreByConditionTier({
             score,
             excellent: excellentGardeningConditions,
             good: goodGardeningConditions,
+            excellentCap: 94,
             goodCap: 90,
-            ordinaryCap: 84,
+            ordinaryCap: 85,
         });
 
         break;
