@@ -32,6 +32,11 @@ import {
   type LumoraLocationCandidate,
   type LumoraLocationSource,
 } from "@/lib/server/lumora/candidates";
+import {
+  getRecommendedWindowForActivity,
+  type WeeklyObligation,
+  type WindowRecommendationV2,
+} from "@/lib/predictions/windowScoring";
 
 function getWeatherBundle({
   admin,
@@ -113,6 +118,11 @@ export type ExploreLocationRanking = {
   use_ndbc_data: boolean | null;
 
   distance_miles: number | null;
+
+  window_stability: WindowRecommendationV2["stability"];
+  window_reasons: string[];
+  alternative_windows: WindowRecommendationV2["alternatives"];
+  window_label: string;
 };
 
 export async function rankLocationCandidatesForExplore({
@@ -255,6 +265,11 @@ export async function rankLocationCandidatesForExplore({
 
           recommended_window: windowRecommendation.recommendedWindow,
           window_score: windowRecommendation.windowScore,
+
+          window_stability: windowRecommendation.stability,
+          window_reasons: windowRecommendation.reasons,
+          alternative_windows: windowRecommendation.alternatives,
+          window_label: windowRecommendation.windowLabel,
 
           explanation,
           weather_snapshot: weatherSnapshot,

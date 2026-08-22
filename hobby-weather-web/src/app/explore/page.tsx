@@ -87,6 +87,17 @@ type LocationRanking = {
     uv_index?: number | null;
   } | null;
   location_context?: Record<string, unknown> | null;
+
+    window_stability?: "stable" | "variable" | "uncertain" | "unavailable";
+    window_reasons?: string[];
+    alternative_windows?: {
+    recommendedWindow: string;
+    windowScore: number;
+    startHour: number;
+    endHour: number;
+    stability: "stable" | "variable" | "uncertain" | "unavailable";
+    }[];
+    window_label?: string;
 };
 
 function toDateString(date: Date) {
@@ -382,6 +393,10 @@ export default function ExplorePage() {
             recommended_window: ranking.recommended_window,
             window_score: ranking.window_score,
             score_components: ranking.score_components ?? null,
+            window_stability: ranking.window_stability ?? null,
+            window_reasons: ranking.window_reasons ?? [],
+            alternative_windows: ranking.alternative_windows ?? [],
+            window_label: ranking.window_label ?? "Best window",
         },
         notes: `Created from Explore. Lumora ranked this location for ${ranking.activity}.`,
         });
@@ -669,8 +684,26 @@ export default function ExplorePage() {
             </label>
             )}
 
-            
+            {exploreScope === "discover" && (
+                <details className="rounded-xl bg-white/[0.04] p-3 text-sm text-slate-300 ring-1 ring-white/[0.055]">
+                    <summary className="cursor-pointer font-semibold text-white">
+                    How Discover personalizes results
+                    </summary>
 
+                    <p className="mt-2 leading-6 text-slate-400">
+                    Discover finds nearby places that match the selected activity and
+                    distance. Lumora then ranks them using activity-specific conditions,
+                    your preferences, forecast stability, schedule-aware windows, and
+                    distance from Home.
+                    </p>
+
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                    Preferences affect the ranking. They do not yet change which types of
+                    places OpenStreetMap initially returns.
+                    </p>
+                </details>
+                )}
+            
             <Button
                 type="button"
                 onClick={runExploreSearch}

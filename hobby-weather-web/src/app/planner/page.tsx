@@ -23,6 +23,10 @@ import {
   EmptyState,
 } from "@/components/ui";
 import { ForecastFreshness } from "@/components/ForecastFreshness";
+import { WindowDetails } from "@/components/WindowDetails";
+import type {
+  WindowRecommendationContext,
+} from "@/lib/predictions/windowTypes";
 
 type ScoreComponents = {
   base_score?: number | null;
@@ -65,13 +69,17 @@ type PredictionRow = {
   prediction_source: string | null;
   recommended_window: string | null;
   window_score: number | null;
+  window_recommendation?: WindowRecommendationContext | null;
+  score_components?: ScoreComponents | null;
+
   weather_snapshot?: Record<string, unknown> | null;
   location_context?: Record<string, unknown> | null;
   feature_json?: {
     preferences?: Record<string, unknown>;
+    score_components?: ScoreComponents;
+    window_recommendation?: WindowRecommendationContext;
     [key: string]: unknown;
   } | null;
-  score_components?: ScoreComponents | null;
 };
 
 type PlannedActivity = {
@@ -188,6 +196,8 @@ export default function PlannerPage() {
         weather_snapshot: item.weather_snapshot ?? null,
         location_context: item.location_context ?? null,
         feature_json: item.feature_json ?? null,
+        window_recommendation:
+          item.feature_json?.window_recommendation ?? null,
         score_components: item.feature_json?.score_components ?? null,
       }));
     } else {
@@ -262,6 +272,7 @@ export default function PlannerPage() {
         location_context: null,
         feature_json: null,
         score_components: null,
+        window_recommendation: null,
       }));
     }
 
@@ -489,6 +500,17 @@ export default function PlannerPage() {
           recommended_window: prediction.recommended_window,
           window_score: prediction.window_score,
           score_components: prediction.score_components ?? null,
+
+          window_recommendation:
+            prediction.window_recommendation ?? null,
+          window_stability:
+            prediction.window_recommendation?.stability ?? null,
+          window_reasons:
+            prediction.window_recommendation?.reasons ?? [],
+          alternative_windows:
+            prediction.window_recommendation?.alternatives ?? [],
+          window_label:
+            prediction.window_recommendation?.windowLabel ?? "Best window",
         },
         notes: "",
       });
@@ -865,6 +887,11 @@ function PredictionCard({
   const downloadHref = makeIcsDownloadHref(icsText);
 
   const displayScore = prediction.planning_score ?? prediction.predicted_score;
+  
+  const windowRecommendation =
+    prediction.window_recommendation ??
+    prediction.feature_json?.window_recommendation ??
+    null;
 
   return (
     <Panel className="relative overflow-hidden border-[rgb(var(--brand-warm-rgb)_/_0.18)] transition hover:border-[rgb(var(--brand-warm-rgb)_/_0.38)] hover:bg-[rgb(var(--brand-warm-rgb)_/_0.04)]">
@@ -922,7 +949,7 @@ function PredictionCard({
         <div className="flex flex-wrap gap-2">
           {prediction.forecast_confidence_label && (
             <Badge variant="info">
-              {prediction.forecast_confidence_label} confidence
+              {formatConfidenceLabel(prediction.forecast_confidence_label)}
             </Badge>
           )}
 
@@ -941,6 +968,8 @@ function PredictionCard({
             </Badge>
           )}
         </div>
+
+        <WindowDetails recommendation={windowRecommendation} />
 
         {prediction.explanation && (
           <p className="text-sm leading-6 text-slate-300">
@@ -1630,4 +1659,12 @@ function getWindowConflicts(
     status: conflicts.length > 0 ? ("conflict" as const) : ("open" as const),
     conflicts,
   };
+}
+
+function formatConfidenceLabel(label: string | null | undefined) {
+  if (!label) return null;
+
+  return label.toLowerCase().includes("confidence")
+    ? label
+    : `${label} confidence`;
 }

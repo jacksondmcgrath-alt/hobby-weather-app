@@ -733,109 +733,126 @@ export default function LocationsPage() {
             </label>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <SelectInput
-              label="Location type"
-              value={locationType}
-              onChange={setLocationType}
-              options={LOCATION_TYPE_OPTIONS}
-            />
+          <SelectInput
+            label="Location type"
+            value={locationType}
+            onChange={setLocationType}
+            options={LOCATION_TYPE_OPTIONS}
+          />
 
-            <SelectInput
-              label="Water type"
-              value={waterType}
-              onChange={setWaterType}
-              options={WATER_TYPE_OPTIONS}
-            />
-          </div>
+          <details className="rounded-2xl bg-slate-950/45 p-4 shadow-inner shadow-slate-950/25 ring-1 ring-white/[0.06]">
+            <summary className="cursor-pointer font-semibold text-white">
+              Also add location details
+            </summary>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <SelectInput
-              label="Water body size"
-              value={waterBodySize}
-              onChange={setWaterBodySize}
-              options={WATER_BODY_SIZE_OPTIONS}
-            />
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Add water, exposure, environmental data, or personal notes when they
+              matter for this place.
+            </p>
 
-            <SelectInput
-              label="Wind exposure"
-              value={windExposure}
-              onChange={setWindExposure}
-              options={WIND_EXPOSURE_OPTIONS}
-            />
-          </div>
+            <div className="mt-5 grid gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <SelectInput
+                  label="Water type"
+                  value={waterType}
+                  onChange={setWaterType}
+                  options={WATER_TYPE_OPTIONS}
+                />
 
-          <label className="grid gap-1">
-            <span className="text-sm text-slate-300">
-              Manual water temperature °F, optional
-            </span>
-            <input
-              type="number"
-              step="any"
-              value={manualWaterTemp}
-              onChange={(event) => setManualWaterTemp(event.target.value)}
-              placeholder="Example: 68"
-              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-            />
-          </label>
+                <SelectInput
+                  label="Water body size"
+                  value={waterBodySize}
+                  onChange={setWaterBodySize}
+                  options={WATER_BODY_SIZE_OPTIONS}
+                />
+              </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
-              <input
-                type="checkbox"
-                checked={useUsgsWaterData}
-                onChange={(event) => setUseUsgsWaterData(event.target.checked)}
+              <SelectInput
+                label="Wind exposure"
+                value={windExposure}
+                onChange={setWindExposure}
+                options={WIND_EXPOSURE_OPTIONS}
               />
-              <span className="text-sm text-slate-300">
-                Use USGS water data
-              </span>
-            </label>
 
-            <label className="grid gap-1">
-              <span className="text-sm text-slate-300">USGS site ID</span>
-              <input
-                type="text"
-                value={usgsSiteId}
-                onChange={(event) => setUsgsSiteId(event.target.value)}
-                placeholder="Example: 04174500"
-                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-              />
-            </label>
-          </div>
+              <label className="grid gap-1">
+                <span className="text-sm text-slate-300">
+                  Manual water temperature °F, optional
+                </span>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3">
-              <input
-                type="checkbox"
-                checked={useNdbcData}
-                onChange={(event) => setUseNdbcData(event.target.checked)}
-              />
-              <span className="text-sm text-slate-300">
-                Use NOAA/NDBC buoy data
-              </span>
-            </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={manualWaterTemp}
+                  onChange={(event) => setManualWaterTemp(event.target.value)}
+                  placeholder="Example: 68"
+                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                />
+              </label>
 
-            <label className="grid gap-1">
-              <span className="text-sm text-slate-300">NDBC station ID</span>
-              <input
-                type="text"
-                value={ndbcStationId}
-                onChange={(event) => setNdbcStationId(event.target.value)}
-                placeholder="Optional"
-                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-              />
-            </label>
-          </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-lg bg-white/[0.04] p-3 ring-1 ring-white/[0.06]">
+                  <input
+                    type="checkbox"
+                    checked={useUsgsWaterData}
+                    onChange={(event) => setUseUsgsWaterData(event.target.checked)}
+                  />
 
-          <label className="grid gap-1">
-            <span className="text-sm text-slate-300">Notes</span>
-            <textarea
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Example: Sheltered from west wind, muddy after rain, good bass spot"
-              className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
-            />
-          </label>
+                  <span className="text-sm text-slate-300">
+                    Use USGS water data
+                  </span>
+                </label>
+
+                <label className="grid gap-1">
+                  <span className="text-sm text-slate-300">USGS site ID</span>
+
+                  <input
+                    type="text"
+                    value={usgsSiteId}
+                    onChange={(event) => setUsgsSiteId(event.target.value)}
+                    placeholder="Example: 04174500"
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-lg bg-white/[0.04] p-3 ring-1 ring-white/[0.06]">
+                  <input
+                    type="checkbox"
+                    checked={useNdbcData}
+                    onChange={(event) => setUseNdbcData(event.target.checked)}
+                  />
+
+                  <span className="text-sm text-slate-300">
+                    Use NOAA/NDBC buoy data
+                  </span>
+                </label>
+
+                <label className="grid gap-1">
+                  <span className="text-sm text-slate-300">NDBC station ID</span>
+
+                  <input
+                    type="text"
+                    value={ndbcStationId}
+                    onChange={(event) => setNdbcStationId(event.target.value)}
+                    placeholder="Optional"
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                  />
+                </label>
+              </div>
+
+              <label className="grid gap-1">
+                <span className="text-sm text-slate-300">Notes</span>
+
+                <textarea
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="Example: Sheltered from west wind, muddy after rain, good bass spot"
+                  className="min-h-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-blue-400"
+                />
+              </label>
+            </div>
+          </details>
 
           <Button type="submit" disabled={saving}>
             {saving ? "Saving..." : "Save location"}

@@ -33,6 +33,10 @@ import {
 import { triggerPredictionGeneration } from "@/lib/triggerPredictionGeneration";
 import { buildLumoraTake } from "@/lib/recommendationText";
 import { ForecastFreshness } from "@/components/ForecastFreshness";
+import { WindowReasonChips } from "@/components/WindowDetails";
+import type {
+  WindowRecommendationContext,
+} from "@/lib/predictions/windowTypes";
 
 type ScoreComponents = {
   base_score?: number | null;
@@ -93,6 +97,8 @@ type PredictionRow = {
   location_context?: Record<string, unknown> | null;
   feature_json?: {
     preferences?: Record<string, unknown>;
+    score_components?: ScoreComponents;
+    window_recommendation?: WindowRecommendationContext;
     [key: string]: unknown;
   } | null;
   prediction_source?: string | null;
@@ -106,6 +112,7 @@ type PredictionRow = {
   rule_weight?: number | null;
   ml_weight?: number | null;
   score_components?: ScoreComponents | null;
+  window_recommendation?: WindowRecommendationContext | null;
 };
 
 type PipelineRun = {
@@ -375,6 +382,8 @@ export default function Home() {
         rule_weight: item.rule_weight,
         ml_weight: item.ml_weight,
         score_components: item.feature_json?.score_components ?? null,
+        window_recommendation:
+          item.feature_json?.window_recommendation ?? null,
       })) as PredictionRow[];
 
       const choice = chooseHomeRecommendation(cleaned);
@@ -565,6 +574,16 @@ export default function Home() {
           recommended_window: topRecommendation.recommended_window ?? null,
           window_score: topRecommendation.window_score ?? null,
           score_components: topRecommendation.score_components ?? null,
+          window_recommendation:
+            topRecommendation.window_recommendation ?? null,
+          window_stability:
+            topRecommendation.window_recommendation?.stability ?? null,
+          window_reasons:
+            topRecommendation.window_recommendation?.reasons ?? [],
+          alternative_windows:
+            topRecommendation.window_recommendation?.alternatives ?? [],
+          window_label:
+            topRecommendation.window_recommendation?.windowLabel ?? "Best window",
         },
       });
 
@@ -593,17 +612,78 @@ export default function Home() {
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-4xl">
-          <header>
-            <h1 className="text-3xl font-bold">
-              Lumora
-            </h1>
+      <div className="mx-auto max-w-5xl">
+          <header className="relative overflow-hidden rounded-3xl bg-slate-950/55 p-6 shadow-xl shadow-slate-950/30 ring-1 ring-white/[0.06] sm:p-8">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_20%,rgb(var(--brand-rgb)_/_0.16),transparent_30%),radial-gradient(circle_at_28%_78%,rgb(var(--brand-warm-rgb)_/_0.11),transparent_34%)]" />
 
-            <p className="mt-2 text-slate-300">
-              Plan outdoor activities, log how they went, and build smarter
-              personalized recommendations over time.
-            </p>
+            <div className="relative">
+              <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-300">
+                <span className="relative h-7 w-7 overflow-hidden rounded-lg">
+                  <Image
+                    src="/lumora-logo.png"
+                    alt=""
+                    fill
+                    sizes="28px"
+                    className="object-cover"
+                  />
+                </span>
+
+                Lumora
+              </div>
+
+              <h1 className="mt-5 max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl">
+                Personalized weather for outdoor plans
+              </h1>
+
+              <p className="mt-4 max-w-3xl text-base leading-7 text-slate-300 sm:text-lg">
+                Lumora helps you decide what to do, when to go, where to go, and how
+                to prepare—using the forecast, your preferences, your schedule, and
+                your places.
+              </p>
+            </div>
           </header>
+
+          <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              {
+                label: "What",
+                value: "Activity scores",
+                detail: "See which enabled activity best fits the conditions.",
+              },
+              {
+                label: "When",
+                value: "Best windows",
+                detail: "Find useful times around the forecast and your schedule.",
+              },
+              {
+                label: "Where",
+                value: "Place rankings",
+                detail: "Compare saved places or discover nearby options.",
+              },
+              {
+                label: "How",
+                value: "Preparation",
+                detail: "Review forecast stability, watchouts, and gear notes.",
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-2xl bg-white/[0.04] p-4 shadow-sm shadow-slate-950/20 ring-1 ring-white/[0.055]"
+              >
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-[rgb(var(--brand-rgb))]">
+                  {item.label}
+                </div>
+
+                <div className="mt-2 font-semibold text-white">
+                  {item.value}
+                </div>
+
+                <p className="mt-1 text-sm leading-6 text-slate-400">
+                  {item.detail}
+                </p>
+              </div>
+            ))}
+          </section>
 
           <section className="mt-8 rounded-2xl bg-slate-900 p-6 shadow">
             <div className="mb-4 flex gap-2">
@@ -633,7 +713,9 @@ export default function Home() {
             </div>
 
             <h2 className="text-xl font-semibold">
-              {authMode === "login" ? "Log in" : "Create account"}
+              {authMode === "login"
+                ? "Log in to your personalized forecast"
+                : "Create your personalized forecast"}
             </h2>
 
             <button
@@ -738,6 +820,10 @@ export default function Home() {
     : "an upcoming day";
 
   const recommendationWindow = getRecommendationWindow(topRecommendation);
+
+  const recommendationWindowLabel =
+    topRecommendation?.window_recommendation?.windowLabel ?? "Best window";
+
   const recommendationExploreHref = buildExploreHref(topRecommendation);
 
   const personalizedScore = getPersonalizedScore(topRecommendation);
@@ -873,7 +959,7 @@ export default function Home() {
               <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1fr_0.75fr_auto_1.35fr] lg:items-start">
                 <div className="sm:col-span-2 lg:col-span-1">
                   <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
-                    Best window
+                    {recommendationWindowLabel}
                   </div>
 
                   <div className="mt-2 break-words text-base font-bold text-white">
@@ -993,6 +1079,20 @@ export default function Home() {
 
                 <div className="mt-4 grid gap-4 rounded-2xl bg-slate-950/45 p-4 shadow-inner shadow-slate-950/30">
                   <div>
+                    {topRecommendation.window_recommendation?.reasons &&
+                      topRecommendation.window_recommendation.reasons.length > 0 && (
+                        <div>
+                          <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                            Why this window
+                          </div>
+
+                          <div className="mt-2">
+                            <WindowReasonChips
+                              recommendation={topRecommendation.window_recommendation}
+                            />
+                          </div>
+                        </div>
+                      )}
                     <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
                       Why this recommendation
                     </div>
