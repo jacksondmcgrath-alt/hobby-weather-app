@@ -546,6 +546,12 @@ export function aggregateDailyWeather(
     }
   }
 
+  const utcOffsetSeconds = Number.isFinite(
+    Number(forecastData.utc_offset_seconds)
+    )
+    ? Number(forecastData.utc_offset_seconds)
+    : null;
+
   const days: DailyWeather[] = [];
 
   for (const [date, rows] of buckets.entries()) {
@@ -704,6 +710,7 @@ export function aggregateDailyWeather(
 
     days.push({
         date,
+        utcOffsetSeconds,
         ...dailyBase,
         pressureChange,
         bugIndex,

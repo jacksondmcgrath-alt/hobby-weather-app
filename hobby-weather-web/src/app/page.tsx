@@ -115,6 +115,27 @@ type PredictionRow = {
   window_recommendation?: WindowRecommendationContext | null;
 };
 
+type FallbackPredictionRow = {
+  date: string | null;
+  activity: string | null;
+  predicted_score: number | null;
+  label: string | null;
+  explanation: string | null;
+  gear_notes: string | null;
+  avg_temp: number | null;
+  wind_max: number | null;
+  rain_chance: number | null;
+  bug_index: number | null;
+  water_temp_est: number | null;
+  best_species: string | null;
+  best_species_score: number | null;
+};
+
+type HomeRecommendationCandidate = Pick<
+  PredictionRow,
+  "date" | "activity" | "predicted_score" | "planning_score"
+>;
+
 type PipelineRun = {
   id: number;
   created_at: string | null;
@@ -169,48 +190,72 @@ export default function Home() {
   const [latestPredictionGeneratedAt, setLatestPredictionGeneratedAt] =
     useState<string | null>(null);
 
-  useEffect(() => {
-    console.log("Home user effect fired:", {
-      authLoading,
-      hasUser: Boolean(user),
-      userId: user?.id,
-    });
+useEffect(() => {
+  if (!user) {
+    setProfile(null);
+    setUpcomingPlans([]);
+    setRecentLogs([]);
+    setTopRecommendation(null);
+    return;
+  }
 
-    if (!user) {
-      setProfile(null);
+  const currentUser = user;
+  let cancelled = false;
+
+  async function loadUserHome() {
+    const profilePromise = (async () => {
+      try {
+        const loadedProfile = await getOrCreateProfile(currentUser);
+
+        if (!cancelled) {
+          setProfile(loadedProfile);
+        }
+
+        return loadedProfile;
+      } catch (error) {
+        console.error("Could not load profile:", error);
+
+        if (!cancelled) {
+          setProfile(null);
+        }
+
+        return null;
+      }
+    })();
+
+    // Show existing cached dashboard data without waiting for regeneration.
+    const [, loadedProfile] = await Promise.all([
+      loadDashboard(currentUser),
+      profilePromise,
+    ]);
+
+    if (cancelled || loadedProfile?.onboarding_complete === false) {
       return;
     }
 
-    const currentUser = user;
-
-  async function loadUserHome() {
+    // Check freshness after the current dashboard is already available.
     try {
-      const loadedProfile = await getOrCreateProfile(currentUser);
-      setProfile(loadedProfile);
-    } catch (error) {
-      console.error("Could not load profile:", error);
-      setProfile(null);
-    }
-
-    try {
-      console.log("Checking whether predictions need refresh...");
-
       const result = await triggerPredictionGeneration({
         force: false,
         reason: "home_opened",
       });
 
-      console.log("Prediction generation result:", result);
+      if (!cancelled && result.status === "generated") {
+        await loadDashboard(currentUser);
+      }
     } catch (error) {
-      console.warn("Could not refresh predictions on home open:", error);
+      console.warn("Could not refresh predictions on Home open:", error);
     }
-
-    await loadDashboard(currentUser);
   }
 
-    loadUserHome();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  void loadUserHome();
+
+  return () => {
+    cancelled = true;
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [user]);
 
   async function loadPredictionFreshness(userId: string) {
     const { data, error } = await supabase
@@ -335,65 +380,93 @@ export default function Home() {
   async function loadTopRecommendation(currentUser: User) {
     const today = new Date().toISOString().slice(0, 10);
 
-    // 1. Try user-specific predictions first
-    const { data: userPredictionData, error: userPredictionError } = await supabase
+    const end = new Date();
+    end.setDate(end.getDate() + 14);
+    const endDate = end.toISOString().slice(0, 10);
+
+    // First load only the fields needed to choose the recommendation.
+    const { data: candidateData, error: candidateError } = await supabase
       .from("user_predictions")
-      .select("*")
+      .select("date,activity,predicted_score,planning_score")
       .eq("user_id", currentUser.id)
       .gte("date", today)
+      .lte("date", endDate)
       .order("date", { ascending: true });
 
-    if (userPredictionError) {
-      throw userPredictionError;
+    if (candidateError) {
+      throw candidateError;
     }
 
-    if ((userPredictionData ?? []).length > 0) {
-      const cleaned = (userPredictionData ?? []).map((item: any) => ({
-        date: item.date,
-        activity: item.activity,
-        predicted_score: item.predicted_score,
-        planning_score: item.planning_score,
-        forecast_confidence: item.forecast_confidence,
-        forecast_confidence_label: item.forecast_confidence_label,
-        label: item.label,
-        explanation: item.explanation,
-        gear_notes: item.gear_notes,
-        avg_temp: item.weather_snapshot?.avg_temp ?? null,
-        wind_max: item.weather_snapshot?.wind_max ?? null,
-        rain_chance: item.weather_snapshot?.rain_chance ?? null,
-        bug_index: item.weather_snapshot?.bug_index ?? null,
-        water_temp_est: item.weather_snapshot?.water_temp_est ?? null,
-        best_species: item.best_species,
-        best_species_score: item.best_species_score,
-        recommended_window: item.recommended_window,
-        window_score: item.window_score,
-        location_name: item.location_name,
-        weather_snapshot: item.weather_snapshot ?? null,
-        location_context: item.location_context ?? null,
-        feature_json: item.feature_json ?? null,
-        prediction_source: item.prediction_source,
-        scoring_method: item.scoring_method,
-        model_version: item.model_version,
-        ml_status: item.ml_status,
-        rule_score: item.rule_score,
-        ml_score: item.ml_score,
-        final_score: item.final_score,
-        blended_score: item.blended_score,
-        rule_weight: item.rule_weight,
-        ml_weight: item.ml_weight,
-        score_components: item.feature_json?.score_components ?? null,
-        window_recommendation:
-          item.feature_json?.window_recommendation ?? null,
-      })) as PredictionRow[];
+    const candidates =
+      (candidateData ?? []) as unknown as HomeRecommendationCandidate[];
 
-      const choice = chooseHomeRecommendation(cleaned);
+    if (candidates.length > 0) {
+      const choice = chooseHomeRecommendation(candidates);
+      const selected = choice.prediction;
 
-      setTopRecommendation(choice.prediction);
-      setTopRecommendationScope(choice.scope);
-      return;
+      if (!selected?.date || !selected.activity) {
+        setTopRecommendation(null);
+        setTopRecommendationScope(choice.scope);
+        return;
+      }
+
+      // Load full context only for the selected recommendation.
+      const { data: selectedPredictionData, error: selectedPredictionError } =
+        await supabase
+          .from("user_predictions")
+          .select(
+            [
+              "date",
+              "activity",
+              "predicted_score",
+              "planning_score",
+              "forecast_confidence",
+              "forecast_confidence_label",
+              "label",
+              "explanation",
+              "gear_notes",
+              "weather_snapshot",
+              "best_species",
+              "best_species_score",
+              "recommended_window",
+              "window_score",
+              "location_name",
+              "location_context",
+              "feature_json",
+              "prediction_source",
+              "scoring_method",
+              "model_version",
+              "ml_status",
+              "rule_score",
+              "ml_score",
+              "final_score",
+              "blended_score",
+              "rule_weight",
+              "ml_weight",
+            ].join(",")
+          )
+          .eq("user_id", currentUser.id)
+          .eq("date", selected.date)
+          .eq("activity", selected.activity)
+          .limit(1)
+          .maybeSingle();
+
+      if (selectedPredictionError) {
+        throw selectedPredictionError;
+      }
+
+      if (selectedPredictionData) {
+        setTopRecommendation(
+          mapUserPrediction(
+            selectedPredictionData as unknown as Record<string, any>
+          )
+        );
+        setTopRecommendationScope(choice.scope);
+        return;
+      }
     }
 
-    // 2. Fall back to global prediction_history
+    // Fall back to the global prediction history.
     const { data: fallbackPredictionData, error: fallbackPredictionError } =
       await supabase
         .from("prediction_history")
@@ -415,13 +488,60 @@ export default function Home() {
           ].join(",")
         )
         .gte("date", today)
+        .lte("date", endDate)
         .order("date", { ascending: true });
 
     if (fallbackPredictionError) {
       throw fallbackPredictionError;
     }
 
-    const fallbackRows = (fallbackPredictionData ?? []) as unknown as PredictionRow[];
+    const typedFallbackData = (fallbackPredictionData ??
+      []) as unknown as FallbackPredictionRow[];
+
+    const fallbackRows: PredictionRow[] = typedFallbackData.map((item) => ({
+      date: item.date,
+      activity: item.activity,
+      predicted_score: item.predicted_score,
+      planning_score: null,
+      forecast_confidence: null,
+      forecast_confidence_label: null,
+
+      label: item.label,
+      explanation: item.explanation,
+      gear_notes: item.gear_notes,
+
+      avg_temp: item.avg_temp,
+      wind_max: item.wind_max,
+      rain_chance: item.rain_chance,
+      bug_index: item.bug_index,
+      water_temp_est: item.water_temp_est,
+
+      best_species: item.best_species,
+      best_species_score: item.best_species_score,
+
+      recommended_window: null,
+      window_score: null,
+      window_recommendation: null,
+
+      location_name: null,
+      weather_snapshot: null,
+      location_context: null,
+      feature_json: null,
+
+      prediction_source: "prediction_history",
+      scoring_method: "prediction_history_fallback",
+      model_version: null,
+      ml_status: null,
+
+      rule_score: null,
+      ml_score: null,
+      final_score: null,
+      blended_score: null,
+      rule_weight: null,
+      ml_weight: null,
+
+      score_components: null,
+    }));
 
     const choice = chooseHomeRecommendation(fallbackRows);
 
@@ -434,14 +554,7 @@ export default function Home() {
     setDashboardError("");
 
     try {
-      const [
-        savedLocationsCount,
-        activityLogsCount,
-        plannedActivitiesCount,
-        scenarioRatingsCount,
-        activityDefaultsCount,
-        weeklyObligationsCount,
-      ] = await Promise.all([
+      const countsPromise = Promise.all([
         getCount("saved_locations", currentUser.id),
         getCount("activity_logs", currentUser.id),
         getCount("planned_activities", currentUser.id),
@@ -449,16 +562,54 @@ export default function Home() {
         getCount("activity_location_defaults", currentUser.id),
         getCount("weekly_obligations", currentUser.id),
       ]);
-      
-      const { data: pipelineData, error: pipelineError } = await supabase
+
+      const pipelinePromise = supabase
         .from("prediction_pipeline_runs")
-        .select("id,created_at,run_source,status,users_processed,predictions_written,error_message")
+        .select(
+          "id,created_at,run_source,status,users_processed,predictions_written,error_message"
+        )
         .order("created_at", { ascending: false })
         .limit(1);
 
-      if (!pipelineError) {
-        setLatestPipelineRun((pipelineData ?? [])[0] ?? null);
-      }
+      const today = new Date().toISOString().slice(0, 10);
+
+      const plansPromise = supabase
+        .from("planned_activities")
+        .select("id,activity,planned_date,planned_window,status,location_name")
+        .eq("user_id", currentUser.id)
+        .gte("planned_date", today)
+        .order("planned_date", { ascending: true })
+        .limit(5);
+
+      const logsPromise = supabase
+        .from("activity_logs")
+        .select("id,activity,date,actual_enjoyment_1_to_10,notes")
+        .eq("user_id", currentUser.id)
+        .order("logged_at", { ascending: false })
+        .limit(5);
+
+      const [
+        countValues,
+        pipelineResponse,
+        plansResponse,
+        logsResponse,
+      ] = await Promise.all([
+        countsPromise,
+        pipelinePromise,
+        plansPromise,
+        logsPromise,
+        loadTopRecommendation(currentUser),
+        loadPredictionFreshness(currentUser.id),
+      ]);
+
+      const [
+        savedLocationsCount,
+        activityLogsCount,
+        plannedActivitiesCount,
+        scenarioRatingsCount,
+        activityDefaultsCount,
+        weeklyObligationsCount,
+      ] = countValues;
 
       setCounts({
         savedLocations: savedLocationsCount,
@@ -469,53 +620,46 @@ export default function Home() {
         weeklyObligations: weeklyObligationsCount,
       });
 
-      const today = new Date().toISOString().slice(0, 10);
-
-      const { data: plansData, error: plansError } = await supabase
-        .from("planned_activities")
-        .select("id,activity,planned_date,planned_window,status,location_name")
-        .eq("user_id", currentUser.id)
-        .gte("planned_date", today)
-        .order("planned_date", { ascending: true })
-        .limit(5);
-
-      if (plansError) {
-        throw plansError;
+      if (!pipelineResponse.error) {
+        setLatestPipelineRun(
+          (pipelineResponse.data ?? [])[0] as PipelineRun | null
+        );
       }
 
-      setUpcomingPlans(plansData ?? []);
-
-      const { data: logsData, error: logsError } = await supabase
-        .from("activity_logs")
-        .select("id,activity,date,actual_enjoyment_1_to_10,notes")
-        .eq("user_id", currentUser.id)
-        .order("logged_at", { ascending: false })
-        .limit(5);
-
-      if (logsError) {
-        throw logsError;
+      if (plansResponse.error) {
+        throw plansResponse.error;
       }
 
-      setRecentLogs(logsData ?? []);
+      setUpcomingPlans(
+        (plansResponse.data ?? []) as unknown as PlannedActivity[]
+      );
 
-      await loadTopRecommendation(currentUser);
-      await loadPredictionFreshness(currentUser.id);
+      if (logsResponse.error) {
+        throw logsResponse.error;
+      }
+
+      setRecentLogs((logsResponse.data ?? []) as unknown as ActivityLog[]);
     } catch (error) {
-      if (error instanceof Error) {
-        setDashboardError(error.message);
-      } else {
-        setDashboardError("Could not load dashboard.");
-      }
+      setDashboardError(
+        error instanceof Error ? error.message : "Could not load dashboard."
+      );
+    } finally {
+      setLoadingDashboard(false);
     }
-
-    setLoadingDashboard(false);
   }
 
   async function saveRecommendationAsPlan() {
     if (!user || !topRecommendation?.date || !topRecommendation?.activity) {
       return;
     }
+    const effectiveWindow = getEffectiveHomeWindow(topRecommendation);
 
+    if (!effectiveWindow.isAvailable) {
+      setRecommendationError(
+        "No remaining recommended window is available today. Open Planner or Explore for another option."
+      );
+      return;
+    }
     setSavingRecommendationPlan(true);
     setRecommendationMessage("");
     setRecommendationError("");
@@ -546,7 +690,7 @@ export default function Home() {
         user_id: user.id,
         activity: topRecommendation.activity,
         planned_date: topRecommendation.date,
-        planned_window: topRecommendation.recommended_window ?? "Suggested time TBD",
+        planned_window: effectiveWindow.recommendedWindow,
         status: "Planned",
         location_name: topRecommendation.location_name ?? "",
         score_at_planning: topRecommendation.predicted_score,
@@ -571,7 +715,7 @@ export default function Home() {
           blended_score: topRecommendation.blended_score ?? null,
           rule_weight: topRecommendation.rule_weight ?? null,
           ml_weight: topRecommendation.ml_weight ?? null,
-          recommended_window: topRecommendation.recommended_window ?? null,
+          recommended_window: effectiveWindow.recommendedWindow,
           window_score: topRecommendation.window_score ?? null,
           score_components: topRecommendation.score_components ?? null,
           window_recommendation:
@@ -819,10 +963,16 @@ export default function Home() {
     ? formatFriendlyDate(topRecommendation.date)
     : "an upcoming day";
 
-  const recommendationWindow = getRecommendationWindow(topRecommendation);
+  const effectiveHomeWindow = getEffectiveHomeWindow(topRecommendation);
+
+  const recommendationWindow =
+    effectiveHomeWindow.recommendedWindow;
 
   const recommendationWindowLabel =
-    topRecommendation?.window_recommendation?.windowLabel ?? "Best window";
+    effectiveHomeWindow.windowLabel;
+
+  const recommendationWindowIsAvailable =
+    effectiveHomeWindow.isAvailable;
 
   const recommendationExploreHref = buildExploreHref(topRecommendation);
 
@@ -1046,10 +1196,16 @@ export default function Home() {
               <div className="mt-8 grid gap-2 sm:flex sm:flex-wrap">
                 <Button
                   onClick={saveRecommendationAsPlan}
-                  disabled={savingRecommendationPlan}
+                  disabled={
+                    savingRecommendationPlan || !recommendationWindowIsAvailable
+                  }
                   className="w-full sm:w-auto"
                 >
-                  {savingRecommendationPlan ? "Saving..." : "Save as plan"}
+                  {savingRecommendationPlan
+                    ? "Saving..."
+                    : recommendationWindowIsAvailable
+                      ? "Save as plan"
+                      : "No window remaining"}
                 </Button>
 
                 <Link
@@ -1059,9 +1215,14 @@ export default function Home() {
                   Explore alternatives
                 </Link>
 
-                {topRecommendation.date && topRecommendation.activity && (
-                  <RecommendationCalendarLink prediction={topRecommendation} />
-                )}
+                {recommendationWindowIsAvailable &&
+                  topRecommendation.date &&
+                  topRecommendation.activity && (
+                    <RecommendationCalendarLink
+                      prediction={topRecommendation}
+                      windowText={recommendationWindow}
+                    />
+                  )}
 
                 <Link
                   href="/planner"
@@ -1393,11 +1554,11 @@ function ChecklistItem({
 
 function RecommendationCalendarLink({
   prediction,
+  windowText,
 }: {
   prediction: PredictionRow;
+  windowText: string;
 }) {
-  const windowText = prediction.recommended_window ?? "Suggested time TBD";
-
   const { start, end } = parseWindowToDates(
     prediction.date ?? new Date().toISOString().slice(0, 10),
     windowText
@@ -1513,11 +1674,62 @@ function addDaysString(days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function chooseHomeRecommendation(predictions: PredictionRow[]) {
+function mapUserPrediction(item: Record<string, any>): PredictionRow {
+  return {
+    date: item.date ?? null,
+    activity: item.activity ?? null,
+    predicted_score: item.predicted_score ?? null,
+    planning_score: item.planning_score ?? null,
+    forecast_confidence: item.forecast_confidence ?? null,
+    forecast_confidence_label: item.forecast_confidence_label ?? null,
+    label: item.label ?? null,
+    explanation: item.explanation ?? null,
+    gear_notes: item.gear_notes ?? null,
+
+    avg_temp: item.weather_snapshot?.avg_temp ?? null,
+    wind_max: item.weather_snapshot?.wind_max ?? null,
+    rain_chance: item.weather_snapshot?.rain_chance ?? null,
+    bug_index: item.weather_snapshot?.bug_index ?? null,
+    water_temp_est: item.weather_snapshot?.water_temp_est ?? null,
+
+    best_species: item.best_species ?? null,
+    best_species_score: item.best_species_score ?? null,
+
+    recommended_window: item.recommended_window ?? null,
+    window_score: item.window_score ?? null,
+    location_name: item.location_name ?? null,
+
+    weather_snapshot: item.weather_snapshot ?? null,
+    location_context: item.location_context ?? null,
+    feature_json: item.feature_json ?? null,
+
+    prediction_source: item.prediction_source ?? null,
+    scoring_method: item.scoring_method ?? null,
+    model_version: item.model_version ?? null,
+    ml_status: item.ml_status ?? null,
+    rule_score: item.rule_score ?? null,
+    ml_score: item.ml_score ?? null,
+    final_score: item.final_score ?? null,
+    blended_score: item.blended_score ?? null,
+    rule_weight: item.rule_weight ?? null,
+    ml_weight: item.ml_weight ?? null,
+
+    score_components: item.feature_json?.score_components ?? null,
+    window_recommendation:
+      item.feature_json?.window_recommendation ?? null,
+  };
+}
+
+function chooseHomeRecommendation<T extends HomeRecommendationCandidate>(
+  predictions: T[]
+): {
+  prediction: T | null;
+  scope: "today" | "tomorrow" | "upcoming";
+} {
   const today = todayString();
   const tomorrow = addDaysString(1);
 
-  function sortBest(rows: PredictionRow[]) {
+  function sortBest(rows: T[]) {
     return [...rows].sort(
       (a, b) =>
         (b.planning_score ?? b.predicted_score ?? 0) -
@@ -1525,12 +1737,14 @@ function chooseHomeRecommendation(predictions: PredictionRow[]) {
     );
   }
 
-  const todayRows = predictions.filter((prediction) => prediction.date === today);
+  const todayRows = predictions.filter(
+    (prediction) => prediction.date === today
+  );
 
   if (todayRows.length > 0) {
     return {
-      prediction: sortBest(todayRows)[0],
-      scope: "today" as const,
+      prediction: sortBest(todayRows)[0] ?? null,
+      scope: "today",
     };
   }
 
@@ -1540,14 +1754,14 @@ function chooseHomeRecommendation(predictions: PredictionRow[]) {
 
   if (tomorrowRows.length > 0) {
     return {
-      prediction: sortBest(tomorrowRows)[0],
-      scope: "tomorrow" as const,
+      prediction: sortBest(tomorrowRows)[0] ?? null,
+      scope: "tomorrow",
     };
   }
 
   return {
     prediction: sortBest(predictions)[0] ?? null,
-    scope: "upcoming" as const,
+    scope: "upcoming",
   };
 }
 
@@ -1617,4 +1831,105 @@ function homeScopeEyebrow(scope: "today" | "tomorrow" | "upcoming") {
   if (scope === "today") return "Highest personalized score today";
   if (scope === "tomorrow") return "Best personalized option tomorrow";
   return "Best upcoming personalized option";
+}
+
+function getEffectiveHomeWindow(prediction: PredictionRow | null) {
+  const fallbackWindow =
+    prediction?.recommended_window ?? "Suggested time TBD";
+
+  const fallback = {
+    recommendedWindow: fallbackWindow,
+    windowLabel:
+      prediction?.window_recommendation?.windowLabel ?? "Best window",
+    isAvailable: !fallbackWindow.includes("No clear"),
+  };
+
+  if (!prediction?.date) {
+    return fallback;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Future dates can use their stored best window unchanged.
+  if (prediction.date > today) {
+    return fallback;
+  }
+
+  if (prediction.date < today) {
+    return {
+      recommendedWindow: "No remaining recommended window",
+      windowLabel: "Best window",
+      isAvailable: false,
+    };
+  }
+
+  const currentHour =
+    new Date().getHours() + new Date().getMinutes() / 60;
+
+  const recommendation = prediction.window_recommendation;
+
+  if (recommendation) {
+    const candidates = [
+      recommendation.startHour !== null &&
+      recommendation.endHour !== null
+        ? {
+            recommendedWindow: recommendation.recommendedWindow,
+            windowScore: recommendation.windowScore,
+            startHour: recommendation.startHour,
+          }
+        : null,
+      ...(recommendation.alternatives ?? []).map((alternative) => ({
+        recommendedWindow: alternative.recommendedWindow,
+        windowScore: alternative.windowScore,
+        startHour: alternative.startHour,
+      })),
+    ]
+      .filter(
+        (
+          candidate
+        ): candidate is {
+          recommendedWindow: string;
+          windowScore: number;
+          startHour: number;
+        } => candidate !== null
+      )
+      .filter((candidate) => candidate.startHour >= currentHour)
+      .sort((a, b) => b.windowScore - a.windowScore);
+
+    const bestRemaining = candidates[0];
+
+    if (bestRemaining) {
+      return {
+        recommendedWindow: bestRemaining.recommendedWindow,
+        windowLabel: recommendation.windowLabel ?? "Best window",
+        isAvailable: true,
+      };
+    }
+
+    return {
+      recommendedWindow: "No remaining recommended window today",
+      windowLabel: recommendation.windowLabel ?? "Best window",
+      isAvailable: false,
+    };
+  }
+
+  // Compatibility for predictions created before Best Window v2.
+  if (
+    fallbackWindow.includes("TBD") ||
+    fallbackWindow.includes("No clear")
+  ) {
+    return fallback;
+  }
+
+  const { start } = parseWindowToDates(prediction.date, fallbackWindow);
+
+  if (start.getTime() > Date.now()) {
+    return fallback;
+  }
+
+  return {
+    recommendedWindow: "No remaining recommended window today",
+    windowLabel: "Best window",
+    isAvailable: false,
+  };
 }

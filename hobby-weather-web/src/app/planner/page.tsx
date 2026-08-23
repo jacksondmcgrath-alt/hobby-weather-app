@@ -148,7 +148,38 @@ export default function PlannerPage() {
 
     const { data: userPredictionData, error: userPredictionError } = await supabase
         .from("user_predictions")
-        .select("*")
+        .select(
+          [
+            "date",
+            "activity",
+            "predicted_score",
+            "label",
+            "explanation",
+            "gear_notes",
+            "weather_snapshot",
+            "best_species",
+            "best_species_score",
+            "planning_score",
+            "forecast_confidence",
+            "forecast_confidence_label",
+            "location_name",
+            "location_context",
+            "feature_json",
+            "rule_score",
+            "ml_score",
+            "final_score",
+            "scoring_method",
+            "model_version",
+            "ml_status",
+            "ml_weight",
+            "rule_weight",
+            "blended_score",
+            "model_explanation",
+            "prediction_source",
+            "recommended_window",
+            "window_score",
+          ].join(",")
+        )
         .eq("user_id", user.id)
         .gte("date", planningRange.startDate)
         .lte("date", planningRange.endDate)

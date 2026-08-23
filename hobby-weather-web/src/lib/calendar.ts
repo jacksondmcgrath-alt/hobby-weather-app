@@ -100,7 +100,7 @@ export function createIcsEvent({
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Hobby Weather Planner//EN",
+    "PRODID:-//Lumora//EN",
     "CALSCALE:GREGORIAN",
     "BEGIN:VEVENT",
     `UID:${uid}`,

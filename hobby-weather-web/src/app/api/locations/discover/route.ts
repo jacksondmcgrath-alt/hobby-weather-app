@@ -11,7 +11,10 @@ import {
   loadSavedLocations,
   loadWeeklyObligations,
 } from "@/lib/server/lumora/userData";
-import { discoverOsmCandidates } from "@/lib/server/lumora/osmDiscovery";
+import {
+  discoverOsmCandidates,
+  OsmDiscoveryError,
+} from "@/lib/server/lumora/osmDiscovery";
 import { rankLocationCandidatesForExplore } from "@/lib/server/lumora/rankCandidates";
 import { authenticateApiRequest } from "@/lib/server/lumora/auth";
 
@@ -34,6 +37,7 @@ function normalizeRadiusMiles(value: unknown) {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
 
   let body: DiscoverLocationsRequest = {};
 
@@ -103,15 +107,38 @@ export async function POST(request: NextRequest) {
 
     const maxCandidates = mode === "week" ? 6 : 8;
 
-    const candidates = await discoverOsmCandidates({
-      activity,
-      latitude: Number(homeLocation.latitude),
-      longitude: Number(homeLocation.longitude),
-      radiusMiles,
-      maxCandidates,
-    });
+    const osmStartedAt = Date.now();
+
+    const discoveryResult = await discoverOsmCandidates({
+        admin,
+        activity,
+        latitude: Number(homeLocation.latitude),
+        longitude: Number(homeLocation.longitude),
+        radiusMiles,
+        maxCandidates,
+        });
+
+    const candidates = discoveryResult.candidates;
+    const discoveryCacheStatus = discoveryResult.cacheStatus;
+
+    const osmElapsedMs = Date.now() - osmStartedAt;
 
     if (candidates.length === 0) {
+        if (process.env.NODE_ENV === "development") {
+            console.log("Explore discovery timing:", {
+            activity,
+            mode,
+            radiusMiles,
+            candidates: 0,
+            rankings: 0,
+            discoveryCacheStatus,
+            osmElapsedMs,
+            rankingElapsedMs: 0,
+            outcome: "no_results",
+            elapsedMs: Date.now() - startedAt,
+            });
+        }
+
       return NextResponse.json({
         ok: true,
         message: `No nearby OpenStreetMap candidates found within ${radiusMiles} mile${
@@ -120,6 +147,8 @@ export async function POST(request: NextRequest) {
         rankings: [],
       });
     }
+
+    const rankingStartedAt = Date.now();
 
     const rankings = await rankLocationCandidatesForExplore({
         admin,
@@ -131,7 +160,24 @@ export async function POST(request: NextRequest) {
         obligations,
     });
 
+    const rankingElapsedMs = Date.now() - rankingStartedAt;
+
     const limitedRankings = mode === "week" ? rankings.slice(0, 15) : rankings;
+
+    if (process.env.NODE_ENV === "development") {
+        console.log("Explore discovery timing:", {
+            activity,
+            mode,
+            radiusMiles,
+            candidates: candidates.length,
+            rankings: limitedRankings.length,
+            discoveryCacheStatus,
+            osmElapsedMs,
+            rankingElapsedMs,
+            outcome: "success",
+            elapsedMs: Date.now() - startedAt,
+        });
+        }
 
     return NextResponse.json({
         ok: true,
@@ -141,6 +187,7 @@ export async function POST(request: NextRequest) {
         rankings: limitedRankings,
         discovery: {
             source: "OpenStreetMap",
+            cache_status: discoveryCacheStatus,
             radius_miles: radiusMiles,
             candidates_found: candidates.length,
             rankings_returned: limitedRankings.length,
@@ -152,14 +199,36 @@ export async function POST(request: NextRequest) {
         },
         });
   } catch (error) {
+    const elapsedMs = Date.now() - startedAt;
+
+    console.error("Explore discovery failed:", {
+        activity,
+        mode,
+        radiusMiles,
+        elapsedMs,
+        error,
+    });
+
+    if (error instanceof OsmDiscoveryError) {
+        return NextResponse.json(
+        {
+            error: error.message,
+            retryable: true,
+        },
+        {
+            status: error.status,
+        }
+        );
+    }
+
     return NextResponse.json(
-      {
+        {
         error:
-          error instanceof Error
+            error instanceof Error
             ? error.message
             : "Could not discover nearby locations.",
-      },
-      { status: 500 }
+        },
+        { status: 500 }
     );
-  }
+    }
 }

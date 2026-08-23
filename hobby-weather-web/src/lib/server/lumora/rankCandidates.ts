@@ -4,10 +4,6 @@ import {
   scoreActivity,
 } from "@/lib/predictions/scoringProfiles";
 import {
-  getRecommendedWindowForActivity,
-  type WeeklyObligation,
-} from "@/lib/predictions/windowScoring";
-import {
   forecastConfidence,
   forecastConfidenceLabel,
   scoreLabel,

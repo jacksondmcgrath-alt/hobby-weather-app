@@ -42,6 +42,7 @@ export type HourlyWeatherRow = {
 
 export type DailyWeather = {
   date: string;
+  utcOffsetSeconds?: number | null;
   avgTemp: number;
   minTemp: number;
   maxTemp: number;

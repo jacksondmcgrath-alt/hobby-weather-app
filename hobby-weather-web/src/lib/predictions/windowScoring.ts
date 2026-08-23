@@ -183,6 +183,40 @@ function candidateMeetsDaylightRule({
   );
 }
 
+function candidateIsStillAvailable({
+  date,
+  candidate,
+  day,
+}: {
+  date: string;
+  candidate: CandidateWindow;
+  day: DailyWeather;
+}) {
+  const offsetSeconds = day.utcOffsetSeconds;
+
+  // Historical data and older cached records may not contain a timezone
+  // offset. Do not remove windows when their local time cannot be determined.
+  if (
+    offsetSeconds === null ||
+    offsetSeconds === undefined ||
+    !Number.isFinite(offsetSeconds)
+  ) {
+    return true;
+  }
+
+  const localNow = new Date(Date.now() + offsetSeconds * 1000);
+  const localDate = localNow.toISOString().slice(0, 10);
+
+  if (date > localDate) return true;
+  if (date < localDate) return false;
+
+  const currentHour =
+    localNow.getUTCHours() + localNow.getUTCMinutes() / 60;
+
+  // A window that has already started is no longer offered as a new plan.
+  return candidate.startHour >= currentHour;
+}
+
 function generateCandidateWindows(profile: ActivityWindowProfile) {
   const candidates: CandidateWindow[] = [];
 
@@ -552,6 +586,17 @@ function scoreCandidateWindow({
   profile: ActivityWindowProfile;
   obligations: WeeklyObligation[];
 }) {
+
+  if (
+    !candidateIsStillAvailable({
+        date: day.date,
+        candidate,
+        day,
+    })
+    ) {
+    return null;
+    }
+
   if (
     candidateConflictsWithObligations({
       date: day.date,

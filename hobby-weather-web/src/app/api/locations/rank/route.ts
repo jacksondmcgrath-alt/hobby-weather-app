@@ -24,6 +24,7 @@ type RankLocationsRequest = {
 };
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
 
   let body: RankLocationsRequest = {};
 
@@ -91,6 +92,16 @@ export async function POST(request: NextRequest) {
     });
 
     const limitedRankings = mode === "week" ? rankings.slice(0, 15) : rankings;
+
+    if (process.env.NODE_ENV === "development") {
+        console.log("Explore saved ranking timing:", {
+            activity,
+            mode,
+            locations: validLocations.length,
+            rankings: limitedRankings.length,
+            elapsedMs: Date.now() - startedAt,
+        });
+        }
 
     return NextResponse.json({
       ok: true,
